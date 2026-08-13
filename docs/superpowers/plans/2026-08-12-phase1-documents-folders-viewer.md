@@ -726,7 +726,7 @@ describe('sha256Hex', () => {
 
   it('matches the known SHA-256 of an empty buffer', () => {
     expect(sha256Hex(Buffer.alloc(0))).toBe(
-      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85'
+      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
     );
   });
 });

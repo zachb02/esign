@@ -1,5 +1,20 @@
+import path from 'node:path';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createCanvas, type Canvas, type SKRSContext2D } from '@napi-rs/canvas';
+
+// pdfjs-dist's Node "fake worker" defaults `GlobalWorkerOptions.workerSrc` to the
+// relative specifier "./pdf.worker.mjs", resolved against pdf.mjs's own
+// `import.meta.url`. When this module is bundled by Next.js's dev server webpack
+// build, that relative path no longer points at a real file on disk (it resolves
+// into the webpack vendor-chunk output, which doesn't contain the worker file),
+// so `getDocument()` throws "Setting up fake worker failed". Pointing
+// `workerSrc` at the actual on-disk file up front avoids that relative lookup;
+// pdfjs-dist loads it via a webpack-ignored dynamic `import()`, so this works
+// whether or not this module itself is bundled.
+pdfjsLib.GlobalWorkerOptions.workerSrc = path.join(
+  process.cwd(),
+  'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'
+);
 
 interface CanvasAndContext {
   canvas: Canvas;

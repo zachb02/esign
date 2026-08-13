@@ -20,6 +20,10 @@ export function FolderTree({
 
   const loadFolders = useCallback(async () => {
     const response = await fetch('/api/folders');
+    if (!response.ok) {
+      console.error('Failed to load folders', await response.text());
+      return;
+    }
     setFolders(await response.json());
   }, []);
 

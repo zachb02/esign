@@ -13,6 +13,10 @@ export function DashboardClient() {
   const loadDocuments = useCallback(async () => {
     const query = selectedFolderId ? `?folderId=${selectedFolderId}` : '?folderId=root';
     const response = await fetch(`/api/documents${query}`);
+    if (!response.ok) {
+      console.error('Failed to load documents', await response.text());
+      return;
+    }
     setDocuments(await response.json());
   }, [selectedFolderId]);
 

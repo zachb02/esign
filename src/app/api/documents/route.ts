@@ -46,9 +46,21 @@ export async function POST(request: NextRequest) {
 
   const fileHash = sha256Hex(buffer);
   const storageKey = `${fileHash}.pdf`;
-  await getDocumentStorage().save(storageKey, buffer);
 
-  const pageCount = await getPdfPageCount(buffer);
+  let pageCount: number;
+  try {
+    pageCount = await getPdfPageCount(buffer);
+  } catch (error) {
+    console.error('PDF page count extraction failed', error);
+    return NextResponse.json({ error: 'File is not a valid PDF' }, { status: 400 });
+  }
+
+  try {
+    await getDocumentStorage().save(storageKey, buffer);
+  } catch (error) {
+    console.error('Failed to store uploaded file', error);
+    return NextResponse.json({ error: 'Failed to store the uploaded file' }, { status: 500 });
+  }
 
   let thumbnailKey: string | null = null;
   try {

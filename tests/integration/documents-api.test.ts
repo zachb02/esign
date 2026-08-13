@@ -54,6 +54,22 @@ describe('documents API', () => {
     expect(await prisma.document.count()).toBe(0);
   });
 
+  it('rejects a corrupt PDF that passes the magic-byte check without writing storage or DB rows', async () => {
+    const corruptPdf = Buffer.concat([
+      Buffer.from('%PDF-1.7\n'),
+      Buffer.from('this is not real pdf content, just garbage bytes after the magic header'),
+    ]);
+    const formData = new FormData();
+    formData.append('file', new File([corruptPdf], 'corrupt.pdf', { type: 'application/pdf' }));
+    const request = new NextRequest('http://localhost/api/documents', {
+      method: 'POST',
+      body: formData,
+    });
+    const response = await documentsRoute.POST(request);
+    expect(response.status).toBe(400);
+    expect(await prisma.document.count()).toBe(0);
+  });
+
   it('uploads a valid PDF, extracts page count, and defaults to DRAFT', async () => {
     const { response, body } = await uploadPdf('agreement.pdf', 3);
     expect(response.status).toBe(201);

@@ -7,9 +7,15 @@ interface FolderTreeProps {
   selectedFolderId: string | null;
   onSelectFolder: (folderId: string | null) => void;
   refreshToken: number;
+  onDocumentMoved?: () => void;
 }
 
-export function FolderTree({ selectedFolderId, onSelectFolder, refreshToken }: FolderTreeProps) {
+export function FolderTree({
+  selectedFolderId,
+  onSelectFolder,
+  refreshToken,
+  onDocumentMoved,
+}: FolderTreeProps) {
   const [folders, setFolders] = useState<FolderRecord[]>([]);
 
   const loadFolders = useCallback(async () => {
@@ -59,6 +65,7 @@ export function FolderTree({ selectedFolderId, onSelectFolder, refreshToken }: F
       body: JSON.stringify({ parentId: newParentId }),
     });
     loadFolders();
+    onDocumentMoved?.();
   }
 
   async function moveDocumentToFolder(documentId: string, folderId: string | null) {
@@ -67,6 +74,7 @@ export function FolderTree({ selectedFolderId, onSelectFolder, refreshToken }: F
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folderId }),
     });
+    onDocumentMoved?.();
   }
 
   function handleDrop(event: React.DragEvent, targetFolderId: string | null) {

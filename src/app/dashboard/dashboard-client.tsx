@@ -27,6 +27,7 @@ export function DashboardClient() {
           selectedFolderId={selectedFolderId}
           onSelectFolder={setSelectedFolderId}
           refreshToken={refreshToken}
+          onDocumentMoved={() => setRefreshToken((t) => t + 1)}
         />
       </aside>
       <main className="flex-1 overflow-y-auto p-6">

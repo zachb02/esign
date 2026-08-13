@@ -40,6 +40,64 @@ model Document {
   pageCount        Int
   fileSizeBytes    Int
   status           DocumentStatus @default(DRAFT)
+  signerRoles      SignerRole[]
+  fields           Field[]
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
+}
+
+enum FieldType {
+  SIGNATURE
+  INITIALS
+  DATE_SIGNED
+  TEXT
+  CHECKBOX
+}
+
+model Template {
+  id               String       @id @default(cuid())
+  title            String
+  originalFilename String
+  fileHash         String
+  storageKey       String
+  thumbnailKey     String?
+  pageCount        Int
+  fileSizeBytes    Int
+  signerRoles      SignerRole[]
+  fields           Field[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model SignerRole {
+  id         String    @id @default(cuid())
+  templateId String?
+  template   Template? @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  name       String
+  order      Int
+  colorIndex Int
+  fields     Field[]
+  createdAt  DateTime  @default(now())
+}
+
+model Field {
+  id           String     @id @default(cuid())
+  templateId   String?
+  template     Template?  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  documentId   String?
+  document     Document?  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  signerRoleId String
+  signerRole   SignerRole @relation(fields: [signerRoleId], references: [id], onDelete: Cascade)
+  type         FieldType
+  page         Int
+  x            Float
+  y            Float
+  width        Float
+  height       Float
+  required     Boolean    @default(true)
+  label        String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 }

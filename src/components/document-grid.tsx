@@ -73,9 +73,8 @@ export function DocumentGrid({ documents }: DocumentGridProps) {
       )}
       <div className={view === 'grid' ? 'grid grid-cols-4 gap-4' : 'flex flex-col divide-y'}>
         {sorted.map((doc) => (
-          <Link
+          <div
             key={doc.id}
-            href={`/documents/${doc.id}`}
             draggable
             onDragStart={(event) =>
               event.dataTransfer.setData('application/x-esign-document-id', doc.id)
@@ -86,20 +85,27 @@ export function DocumentGrid({ documents }: DocumentGridProps) {
                 : 'flex items-center gap-3 py-2 hover:bg-neutral-50'
             }
           >
-            <img
-              src={doc.thumbnailKey ? `/api/documents/${doc.id}/thumbnail` : '/pdf-placeholder.svg'}
-              alt=""
-              className={
-                view === 'grid'
-                  ? 'h-32 w-full rounded border object-cover'
-                  : 'h-10 w-8 rounded border object-cover'
-              }
-            />
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-medium">{doc.title}</p>
-              <p className="text-xs text-neutral-500">{STATUS_LABELS[doc.status]}</p>
-            </div>
-          </Link>
+            <Link href={`/documents/${doc.id}`} className="contents">
+              <img
+                src={doc.thumbnailKey ? `/api/documents/${doc.id}/thumbnail` : '/pdf-placeholder.svg'}
+                alt=""
+                className={
+                  view === 'grid'
+                    ? 'h-32 w-full rounded border object-cover'
+                    : 'h-10 w-8 rounded border object-cover'
+                }
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium">{doc.title}</p>
+                <p className="text-xs text-neutral-500">{STATUS_LABELS[doc.status]}</p>
+              </div>
+            </Link>
+            {doc.status === 'DRAFT' && (
+              <Link href={`/documents/${doc.id}/edit`} className="text-xs underline">
+                Edit fields
+              </Link>
+            )}
+          </div>
         ))}
       </div>
     </div>

@@ -55,6 +55,14 @@ export async function renderPdfPageToPng(
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(pdfBuffer),
     disableFontFace: true,
+    // Required so pdfjs-dist can source glyph outlines for PDF "standard 14"
+    // fonts (Helvetica, Times, Courier, ...) that are referenced by name only
+    // rather than embedded as a font program in the PDF. This is extremely
+    // common (e.g. pdf-lib's StandardFonts.Helvetica). Without this, and with
+    // disableFontFace preventing browser-style @font-face substitution,
+    // pdfjs-dist silently drops all such glyphs and only vector graphics
+    // (lines/rectangles/images) render, producing blank-looking thumbnails.
+    standardFontDataUrl: path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/'),
   });
   const pdfDocument = await loadingTask.promise;
   const page = await pdfDocument.getPage(pageNumber);

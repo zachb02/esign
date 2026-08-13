@@ -25,7 +25,7 @@ export function DashboardClient() {
   }, [loadDocuments, refreshToken]);
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-full">
       <aside className="w-64 shrink-0 overflow-y-auto border-r">
         <FolderTree
           selectedFolderId={selectedFolderId}

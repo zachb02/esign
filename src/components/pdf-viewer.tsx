@@ -51,7 +51,7 @@ export function PdfViewer({ documentId, title }: PdfViewerProps) {
   }, [pdfDoc, pageNumber, scale]);
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b px-4 py-2">
         <h1 className="truncate font-medium">{title}</h1>
         <div className="flex items-center gap-3 text-sm">

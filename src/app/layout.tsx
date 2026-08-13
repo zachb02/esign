@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { AppNav } from '@/components/app-nav';
 
 export const metadata: Metadata = {
   title: 'eSign',
@@ -9,7 +10,12 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <div className="flex h-screen flex-col">
+          <AppNav />
+          <div className="flex-1 overflow-hidden">{children}</div>
+        </div>
+      </body>
     </html>
   );
 }

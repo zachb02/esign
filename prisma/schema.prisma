@@ -11,7 +11,7 @@ model Folder {
   id        String     @id @default(cuid())
   name      String
   parentId  String?
-  parent    Folder?    @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  parent    Folder?    @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict)
   children  Folder[]   @relation("FolderTree")
   documents Document[]
   createdAt DateTime   @default(now())

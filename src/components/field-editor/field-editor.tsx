@@ -121,7 +121,10 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
       const body = await response.json().catch(() => ({ error: 'Failed to update field' }));
       window.alert(body.error ?? 'Failed to update field');
       loadFields();
+      return;
     }
+    const updated: FieldRecord = await response.json();
+    setFields((prev) => prev.map((f) => (f.id === id ? updated : f)));
   }
 
   async function deleteField(id: string) {

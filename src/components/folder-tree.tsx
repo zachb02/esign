@@ -34,22 +34,32 @@ export function FolderTree({
   async function createFolder(parentId: string | null) {
     const name = window.prompt('Folder name');
     if (!name) return;
-    await fetch('/api/folders', {
+    const response = await fetch('/api/folders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, parentId }),
     });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Request failed' }));
+      window.alert(body.error ?? 'Failed to create folder');
+      return;
+    }
     loadFolders();
   }
 
   async function renameFolder(id: string, currentName: string) {
     const name = window.prompt('Rename folder', currentName);
     if (!name || name === currentName) return;
-    await fetch(`/api/folders/${id}`, {
+    const response = await fetch(`/api/folders/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Request failed' }));
+      window.alert(body.error ?? 'Failed to rename folder');
+      return;
+    }
     loadFolders();
   }
 
@@ -57,27 +67,42 @@ export function FolderTree({
     if (!window.confirm('Delete this folder? Its documents and subfolders move up one level.')) {
       return;
     }
-    await fetch(`/api/folders/${id}`, { method: 'DELETE' });
+    const response = await fetch(`/api/folders/${id}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Request failed' }));
+      window.alert(body.error ?? 'Failed to delete folder');
+      return;
+    }
     if (selectedFolderId === id) onSelectFolder(null);
     loadFolders();
   }
 
   async function reparentFolder(id: string, newParentId: string | null) {
-    await fetch(`/api/folders/${id}`, {
+    const response = await fetch(`/api/folders/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ parentId: newParentId }),
     });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Request failed' }));
+      window.alert(body.error ?? 'Failed to move folder');
+      return;
+    }
     loadFolders();
     onDocumentMoved?.();
   }
 
   async function moveDocumentToFolder(documentId: string, folderId: string | null) {
-    await fetch(`/api/documents/${documentId}`, {
+    const response = await fetch(`/api/documents/${documentId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folderId }),
     });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Request failed' }));
+      window.alert(body.error ?? 'Failed to move document');
+      return;
+    }
     onDocumentMoved?.();
   }
 

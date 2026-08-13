@@ -43,4 +43,16 @@ describe('clampFieldRect', () => {
     expect(result.width).toBeGreaterThan(0);
     expect(result.height).toBeGreaterThan(0);
   });
+
+  it('enforces MIN_SIZE when x is near 1, shrinking would go below MIN_SIZE', () => {
+    const result = clampFieldRect({ x: 0.995, y: 0.5, width: 0.5, height: 0.06 });
+    expect(result.width).toBeGreaterThanOrEqual(0.01);
+    expect(result.x).toBeLessThanOrEqual(0.99);
+  });
+
+  it('enforces MIN_SIZE when y is near 1, shrinking would go below MIN_SIZE', () => {
+    const result = clampFieldRect({ x: 0.5, y: 0.995, width: 0.2, height: 0.1 });
+    expect(result.height).toBeGreaterThanOrEqual(0.01);
+    expect(result.y).toBeLessThanOrEqual(0.99);
+  });
 });

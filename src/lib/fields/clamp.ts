@@ -21,6 +21,11 @@ export function clampFieldRect(rect: FieldRect): FieldRect {
   // Otherwise, clamp x first, then keep width
   if (x >= 0 && x < 1) {
     width = Math.min(width, 1 - x);
+    // If shrinking width would go below MIN_SIZE, clamp x instead
+    if (width < MIN_SIZE) {
+      x = Math.max(0, 1 - MIN_SIZE);
+      width = MIN_SIZE;
+    }
   } else {
     x = Math.max(0, Math.min(x, 1 - width));
   }
@@ -29,6 +34,11 @@ export function clampFieldRect(rect: FieldRect): FieldRect {
   // Otherwise, clamp y first, then keep height
   if (y >= 0 && y < 1) {
     height = Math.min(height, 1 - y);
+    // If shrinking height would go below MIN_SIZE, clamp y instead
+    if (height < MIN_SIZE) {
+      y = Math.max(0, 1 - MIN_SIZE);
+      height = MIN_SIZE;
+    }
   } else {
     y = Math.max(0, Math.min(y, 1 - height));
   }

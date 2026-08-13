@@ -27,7 +27,6 @@ afterAll(async () => {
   delete process.env.ESIGN_DATA_DIR;
   await prisma.document.deleteMany();
   await prisma.folder.deleteMany();
-  await prisma.$disconnect();
 });
 
 async function uploadPdf(fileName: string, pageCount: number) {

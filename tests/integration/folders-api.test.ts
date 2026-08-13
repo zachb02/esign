@@ -22,7 +22,6 @@ beforeEach(async () => {
 afterAll(async () => {
   await prisma.document.deleteMany();
   await prisma.folder.deleteMany();
-  await prisma.$disconnect();
 });
 
 describe('folders API', () => {

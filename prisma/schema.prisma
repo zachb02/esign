@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Folder {
+  id        String     @id @default(cuid())
+  name      String
+  parentId  String?
+  parent    Folder?    @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[]   @relation("FolderTree")
+  documents Document[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+enum DocumentStatus {
+  DRAFT
+  SENT
+  IN_PROGRESS
+  COMPLETED
+  DECLINED
+  EXPIRED
+  ARCHIVED
+}
+
+model Document {
+  id               String         @id @default(cuid())
+  title            String
+  folderId         String?
+  folder           Folder?        @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  originalFilename String
+  fileHash         String
+  storageKey       String
+  thumbnailKey     String?
+  pageCount        Int
+  fileSizeBytes    Int
+  status           DocumentStatus @default(DRAFT)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}

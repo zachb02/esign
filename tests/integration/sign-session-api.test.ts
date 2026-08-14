@@ -446,4 +446,70 @@ describe('POST /api/sign/:token/complete', () => {
     const value = await prisma.fieldValue.findUnique({ where: { fieldId: dateField.id } });
     expect(value?.dateValue).not.toBeNull();
   });
+
+  it('preserves the SIGNED recipient and falls back to IN_PROGRESS when flattening the PDF throws', async () => {
+    // Bytes that pass the magic-byte check but are not a real PDF, so
+    // PDFDocument.load inside flattenPdf throws naturally (same pattern as
+    // the corrupt-PDF test in documents-api.test.ts).
+    const corruptPdf = Buffer.concat([
+      Buffer.from('%PDF-1.7\n'),
+      Buffer.from('this is not real pdf content, just garbage bytes after the magic header'),
+    ]);
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h10',
+        storageKey: 'h10.pdf',
+        pageCount: 1,
+        fileSizeBytes: corruptPdf.byteLength,
+        status: 'SENT',
+      },
+    });
+    await getDocumentStorage().save('h10.pdf', corruptPdf);
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+        required: true,
+      },
+    });
+    const recipient = await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'flatten-fail-token',
+      },
+    });
+    await prisma.fieldValue.create({
+      data: { fieldId: field.id, recipientId: recipient.id, textValue: 'Jane Doe' },
+    });
+
+    const request = new NextRequest('http://localhost/api/sign/flatten-fail-token/complete', {
+      method: 'POST',
+    });
+    const response = await completeRoute.POST(request, {
+      params: Promise.resolve({ token: 'flatten-fail-token' }),
+    });
+    expect(response.status).toBe(200);
+
+    const reloadedRecipient = await prisma.recipient.findUnique({ where: { id: recipient.id } });
+    expect(reloadedRecipient?.status).toBe('SIGNED');
+    expect(reloadedRecipient?.signedAt).not.toBeNull();
+
+    const reloadedDocument = await prisma.document.findUnique({ where: { id: document.id } });
+    expect(reloadedDocument?.status).toBe('IN_PROGRESS');
+    expect(reloadedDocument?.completedPdfKey).toBeNull();
+  });
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { FIELD_TYPE_LABELS, ROLE_COLORS } from '@/lib/fields/field-defaults';
 import type { FieldRecord, SignerRoleRecord } from './types';
 
@@ -35,6 +35,8 @@ export function FieldBox({
   const resizeState = useRef<{ startX: number; startY: number; width: number; height: number } | null>(
     null
   );
+  const [draftPosition, setDraftPosition] = useState<{ x: number; y: number } | null>(null);
+  const [draftSize, setDraftSize] = useState<{ width: number; height: number } | null>(null);
 
   function handleDragMouseDown(event: React.MouseEvent) {
     event.stopPropagation();
@@ -53,11 +55,20 @@ export function FieldBox({
       if (!dragState.current) return;
       const deltaX = (moveEvent.clientX - dragState.current.startX) / rect.width;
       const deltaY = (moveEvent.clientY - dragState.current.startY) / rect.height;
-      onMove(dragState.current.fieldX + deltaX, dragState.current.fieldY + deltaY);
+      setDraftPosition({
+        x: dragState.current.fieldX + deltaX,
+        y: dragState.current.fieldY + deltaY,
+      });
     }
 
-    function handleMouseUp() {
+    function handleMouseUp(upEvent: MouseEvent) {
+      if (dragState.current) {
+        const deltaX = (upEvent.clientX - dragState.current.startX) / rect.width;
+        const deltaY = (upEvent.clientY - dragState.current.startY) / rect.height;
+        onMove(dragState.current.fieldX + deltaX, dragState.current.fieldY + deltaY);
+      }
       dragState.current = null;
+      setDraftPosition(null);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     }
@@ -82,11 +93,20 @@ export function FieldBox({
       if (!resizeState.current) return;
       const deltaWidth = (moveEvent.clientX - resizeState.current.startX) / rect.width;
       const deltaHeight = (moveEvent.clientY - resizeState.current.startY) / rect.height;
-      onResize(resizeState.current.width + deltaWidth, resizeState.current.height + deltaHeight);
+      setDraftSize({
+        width: resizeState.current.width + deltaWidth,
+        height: resizeState.current.height + deltaHeight,
+      });
     }
 
-    function handleMouseUp() {
+    function handleMouseUp(upEvent: MouseEvent) {
+      if (resizeState.current) {
+        const deltaWidth = (upEvent.clientX - resizeState.current.startX) / rect.width;
+        const deltaHeight = (upEvent.clientY - resizeState.current.startY) / rect.height;
+        onResize(resizeState.current.width + deltaWidth, resizeState.current.height + deltaHeight);
+      }
       resizeState.current = null;
+      setDraftSize(null);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     }
@@ -96,6 +116,10 @@ export function FieldBox({
   }
 
   const color = role ? ROLE_COLORS[role.colorIndex % ROLE_COLORS.length] : '#999999';
+  const displayX = draftPosition ? draftPosition.x : field.x;
+  const displayY = draftPosition ? draftPosition.y : field.y;
+  const displayWidth = draftSize ? draftSize.width : field.width;
+  const displayHeight = draftSize ? draftSize.height : field.height;
 
   return (
     <div
@@ -106,10 +130,10 @@ export function FieldBox({
       }}
       className="absolute flex cursor-move items-center justify-center overflow-hidden rounded border-2 text-[10px] font-medium"
       style={{
-        left: `${field.x * 100}%`,
-        top: `${field.y * 100}%`,
-        width: `${field.width * 100}%`,
-        height: `${field.height * 100}%`,
+        left: `${displayX * 100}%`,
+        top: `${displayY * 100}%`,
+        width: `${displayWidth * 100}%`,
+        height: `${displayHeight * 100}%`,
         borderColor: color,
         backgroundColor: `${color}22`,
         color,

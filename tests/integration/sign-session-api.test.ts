@@ -1,5 +1,8 @@
-import { describe, expect, it, beforeEach, afterAll } from 'vitest';
+import { describe, expect, it, beforeEach, afterAll, beforeAll } from 'vitest';
 import { NextRequest } from 'next/server';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { prisma } from '@/lib/db/prisma';
 import * as sessionRoute from '@/app/api/sign/[token]/route';
 import * as fieldValueRoute from '@/app/api/sign/[token]/fields/[fieldId]/route';
@@ -7,6 +10,13 @@ import * as completeRoute from '@/app/api/sign/[token]/complete/route';
 import * as declineRoute from '@/app/api/sign/[token]/decline/route';
 import { getDocumentStorage } from '@/lib/storage';
 import { makeTestPdf } from '../fixtures/make-test-pdf';
+
+let dataDir: string;
+
+beforeAll(() => {
+  dataDir = mkdtempSync(path.join(tmpdir(), 'esign-sign-session-test-'));
+  process.env.ESIGN_DATA_DIR = dataDir;
+});
 
 beforeEach(async () => {
   await prisma.fieldValue.deleteMany();
@@ -17,6 +27,8 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  rmSync(dataDir, { recursive: true, force: true });
+  delete process.env.ESIGN_DATA_DIR;
   await prisma.fieldValue.deleteMany();
   await prisma.recipient.deleteMany();
   await prisma.field.deleteMany();

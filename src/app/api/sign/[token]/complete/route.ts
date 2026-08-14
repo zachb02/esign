@@ -71,53 +71,87 @@ export async function POST(
   });
 
   if (remainingPending === 0) {
-    try {
-      const allFields = await prisma.field.findMany({
-        where: { documentId: recipient.documentId },
-        include: { value: true },
-      });
+    // A sibling recipient may have declined between this recipient's own
+    // SIGNED update above and this check — re-fetch the current status so we
+    // never flatten (and mark "completed") a document that was just declined.
+    const currentDocument = await prisma.document.findUnique({
+      where: { id: recipient.documentId },
+      select: { status: true },
+    });
 
-      const flattenInputs: FlattenFieldInput[] = [];
-      for (const field of allFields) {
-        let signaturePng: Buffer | null = null;
-        if (field.value?.signatureImageKey) {
-          signaturePng = await getSignatureStorage().read(field.value.signatureImageKey);
-        }
-        flattenInputs.push({
-          type: field.type,
-          page: field.page,
-          x: field.x,
-          y: field.y,
-          width: field.width,
-          height: field.height,
-          textValue: field.value?.textValue ?? null,
-          checked: field.value?.checked ?? null,
-          signaturePng,
-          dateValue: field.value?.dateValue ?? null,
+    if (currentDocument?.status === 'DECLINED') {
+      console.log(
+        `Document ${recipient.documentId} was declined by a sibling recipient; skipping flatten`
+      );
+    } else {
+      try {
+        const allFields = await prisma.field.findMany({
+          where: { documentId: recipient.documentId },
+          include: { value: true },
         });
+
+        const flattenInputs: FlattenFieldInput[] = [];
+        for (const field of allFields) {
+          let signaturePng: Buffer | null = null;
+          if (field.value?.signatureImageKey) {
+            signaturePng = await getSignatureStorage().read(field.value.signatureImageKey);
+          }
+          flattenInputs.push({
+            type: field.type,
+            page: field.page,
+            x: field.x,
+            y: field.y,
+            width: field.width,
+            height: field.height,
+            textValue: field.value?.textValue ?? null,
+            checked: field.value?.checked ?? null,
+            signaturePng,
+            dateValue: field.value?.dateValue ?? null,
+          });
+        }
+
+        const originalBytes = await getDocumentStorage().read(document.storageKey);
+        const flattenedBytes = await flattenPdf(originalBytes, flattenInputs);
+        const completedKey = `${sha256Hex(flattenedBytes)}-completed.pdf`;
+        await getDocumentStorage().save(completedKey, flattenedBytes);
+
+        // Only move the document into COMPLETED if it hasn't already been
+        // finalized (declined or completed) by a concurrent request. If a
+        // sibling's decline landed between our re-check above and now, this
+        // is a no-op and the document correctly stays DECLINED — the
+        // recipient's own SIGNED status (already committed) is unaffected.
+        const { count } = await prisma.document.updateMany({
+          where: { id: recipient.documentId, status: { notIn: ['DECLINED', 'COMPLETED'] } },
+          data: { status: 'COMPLETED', completedPdfKey: completedKey },
+        });
+        if (count === 0) {
+          console.log(
+            `Document ${recipient.documentId} was already finalized by a concurrent request; skipping COMPLETED status write`
+          );
+        }
+      } catch (error) {
+        console.error('PDF flattening failed after final recipient completed', error);
+        const { count } = await prisma.document.updateMany({
+          where: { id: recipient.documentId, status: { notIn: ['DECLINED', 'COMPLETED'] } },
+          data: { status: 'IN_PROGRESS' },
+        });
+        if (count === 0) {
+          console.log(
+            `Document ${recipient.documentId} was already finalized by a concurrent request; skipping IN_PROGRESS status write`
+          );
+        }
       }
-
-      const originalBytes = await getDocumentStorage().read(document.storageKey);
-      const flattenedBytes = await flattenPdf(originalBytes, flattenInputs);
-      const completedKey = `${sha256Hex(flattenedBytes)}-completed.pdf`;
-      await getDocumentStorage().save(completedKey, flattenedBytes);
-
-      await prisma.document.update({
-        where: { id: recipient.documentId },
-        data: { status: 'COMPLETED', completedPdfKey: completedKey },
-      });
-    } catch (error) {
-      console.error('PDF flattening failed after final recipient completed', error);
-      await prisma.document.update({
-        where: { id: recipient.documentId },
-        data: { status: 'IN_PROGRESS' },
-      });
     }
   } else {
-    await prisma.document.update({
-      where: { id: recipient.documentId },
+    const { count } = await prisma.document.updateMany({
+      where: { id: recipient.documentId, status: { notIn: ['DECLINED', 'COMPLETED'] } },
       data: { status: 'IN_PROGRESS' },
     });
+    if (count === 0) {
+      console.log(
+        `Document ${recipient.documentId} was already finalized by a concurrent request; skipping IN_PROGRESS status write`
+      );
+    }
   }
 
   return NextResponse.json({ success: true });

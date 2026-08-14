@@ -874,3 +874,179 @@ describe('POST /api/sign/:token/decline', () => {
     expect(response.status).toBe(400);
   });
 });
+
+describe('Document.status transition race guards', () => {
+  it('does not flip the document back to COMPLETED when the last pending recipient completes after a sibling already declined', async () => {
+    const pdfBytes = await makeTestPdf(1);
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-race-1',
+        storageKey: 'h-race-1.pdf',
+        pageCount: 1,
+        fileSizeBytes: pdfBytes.byteLength,
+        status: 'SENT',
+      },
+    });
+    await getDocumentStorage().save('h-race-1.pdf', pdfBytes);
+    const roleA = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer A', order: 0, colorIndex: 0 },
+    });
+    const roleB = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer B', order: 1, colorIndex: 1 },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleA.id,
+        name: 'A',
+        email: 'a@example.com',
+        signingToken: 'race-a',
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleB.id,
+        name: 'B',
+        email: 'b@example.com',
+        signingToken: 'race-b',
+      },
+    });
+
+    // B declines first — document goes DECLINED, A is now the only remaining
+    // pending recipient.
+    const declineRequest = new NextRequest('http://localhost/api/sign/race-b/decline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const declineResponse = await declineRoute.POST(declineRequest, {
+      params: Promise.resolve({ token: 'race-b' }),
+    });
+    expect(declineResponse.status).toBe(200);
+
+    // A then tries to complete. Whether blocked outright by the top-level
+    // DECLINED guard or by the conditional status-write guard deeper in the
+    // route, the document must never end up COMPLETED and no completed PDF
+    // may be produced for a document a party explicitly declined.
+    const completeRequest = new NextRequest('http://localhost/api/sign/race-a/complete', {
+      method: 'POST',
+    });
+    await completeRoute.POST(completeRequest, { params: Promise.resolve({ token: 'race-a' }) });
+
+    const reloadedDocument = await prisma.document.findUnique({ where: { id: document.id } });
+    expect(reloadedDocument?.status).toBe('DECLINED');
+    expect(reloadedDocument?.completedPdfKey).toBeNull();
+  });
+
+  it('does not let decline overwrite an already-COMPLETED document status, but still records the recipient\'s own DECLINED state', async () => {
+    // Simulates the race window directly at the DB layer: the document has
+    // already been finalized as COMPLETED by a concurrent request (e.g. a
+    // sibling recipient's completion), but this recipient's own row is still
+    // PENDING. This deterministically exercises the conditional
+    // `updateMany` guard in decline/route.ts without needing true
+    // concurrency, since the top-level guard in that route only rejects
+    // when status is DECLINED, not COMPLETED.
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-race-2',
+        storageKey: 'h-race-2.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'COMPLETED',
+        completedPdfKey: 'some-completed-key.pdf',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const recipient = await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'C',
+        email: 'c@example.com',
+        signingToken: 'race-completed-decline',
+      },
+    });
+
+    const request = new NextRequest('http://localhost/api/sign/race-completed-decline/decline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const response = await declineRoute.POST(request, {
+      params: Promise.resolve({ token: 'race-completed-decline' }),
+    });
+    expect(response.status).toBe(200);
+
+    const reloadedRecipient = await prisma.recipient.findUnique({ where: { id: recipient.id } });
+    expect(reloadedRecipient?.status).toBe('DECLINED');
+
+    const reloadedDocument = await prisma.document.findUnique({ where: { id: document.id } });
+    expect(reloadedDocument?.status).toBe('COMPLETED');
+    expect(reloadedDocument?.completedPdfKey).toBe('some-completed-key.pdf');
+  });
+
+  it('does not let a non-last completion overwrite an already-COMPLETED document status with IN_PROGRESS', async () => {
+    // Mirror case: the document was already finalized COMPLETED by a
+    // concurrent request, but this recipient (one of several) still has a
+    // PENDING row and is not the last one. Their own completion must not
+    // regress the document's shared status back to IN_PROGRESS.
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-race-3',
+        storageKey: 'h-race-3.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'COMPLETED',
+        completedPdfKey: 'some-other-completed-key.pdf',
+      },
+    });
+    const roleA = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer A', order: 0, colorIndex: 0 },
+    });
+    const roleB = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer B', order: 1, colorIndex: 1 },
+    });
+    const recipientA = await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleA.id,
+        name: 'A',
+        email: 'a@example.com',
+        signingToken: 'race-completed-complete-a',
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleB.id,
+        name: 'B',
+        email: 'b@example.com',
+        signingToken: 'race-completed-complete-b',
+      },
+    });
+
+    const request = new NextRequest('http://localhost/api/sign/race-completed-complete-a/complete', {
+      method: 'POST',
+    });
+    const response = await completeRoute.POST(request, {
+      params: Promise.resolve({ token: 'race-completed-complete-a' }),
+    });
+    expect(response.status).toBe(200);
+
+    const reloadedRecipientA = await prisma.recipient.findUnique({ where: { id: recipientA.id } });
+    expect(reloadedRecipientA?.status).toBe('SIGNED');
+
+    const reloadedDocument = await prisma.document.findUnique({ where: { id: document.id } });
+    expect(reloadedDocument?.status).toBe('COMPLETED');
+    expect(reloadedDocument?.completedPdfKey).toBe('some-other-completed-key.pdf');
+  });
+});

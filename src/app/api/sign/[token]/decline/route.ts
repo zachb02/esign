@@ -30,16 +30,25 @@ export async function POST(
   const reason = typeof body.reason === 'string' ? body.reason.trim() || null : null;
   const now = new Date();
 
-  await prisma.$transaction([
+  // The recipient's own DECLINED status always commits — that row is owned by
+  // this recipient. The shared Document.status write is guarded so a
+  // concurrent complete() that already finalized the document (COMPLETED, or
+  // a race where another recipient already declined) can't be clobbered.
+  const [, { count }] = await prisma.$transaction([
     prisma.recipient.update({
       where: { id: recipient.id },
       data: { status: 'DECLINED', declinedAt: now, declineReason: reason },
     }),
-    prisma.document.update({
-      where: { id: recipient.documentId },
+    prisma.document.updateMany({
+      where: { id: recipient.documentId, status: { notIn: ['DECLINED', 'COMPLETED'] } },
       data: { status: 'DECLINED' },
     }),
   ]);
+  if (count === 0) {
+    console.log(
+      `Document ${recipient.documentId} was already finalized by a concurrent request; skipping DECLINED status write`
+    );
+  }
 
   return NextResponse.json({ success: true });
 }

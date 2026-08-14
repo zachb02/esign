@@ -46,6 +46,17 @@ export function SignClient({ token }: SignClientProps) {
   const [numPages, setNumPages] = useState(0);
   const [activeSignatureFieldId, setActiveSignatureFieldId] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
+  // Bumped on every loadSession() call, unconditionally. The TEXT and
+  // CHECKBOX inputs below are uncontrolled (defaultValue/defaultChecked) and
+  // only resync to the server's truth when React actually remounts them —
+  // which React only does when their `key` changes. Deriving the key purely
+  // from the field's server value doesn't work: after a rejected save, the
+  // server value is unchanged, so the key would be byte-identical to before
+  // and React would leave the stale, rejected DOM value on screen. Folding
+  // this nonce into the key forces a remount on every reload regardless of
+  // whether the underlying value actually changed, guaranteeing the fresh
+  // defaultValue/defaultChecked is read from the server on every attempt.
+  const [reloadNonce, setReloadNonce] = useState(0);
   const pageRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
 
@@ -54,9 +65,11 @@ export function SignClient({ token }: SignClientProps) {
     if (!response.ok) {
       const body = await response.json().catch(() => ({ error: 'Signing link not found' }));
       setLoadError(body.error ?? 'Signing link not found');
+      setReloadNonce((n) => n + 1);
       return;
     }
     setSession(await response.json());
+    setReloadNonce((n) => n + 1);
   }, [token]);
 
   useEffect(() => {
@@ -104,10 +117,13 @@ export function SignClient({ token }: SignClientProps) {
       const body = await response.json().catch(() => ({ error: 'Failed to save value' }));
       window.alert(body.error ?? 'Failed to save value');
       // The TEXT input is uncontrolled and only resyncs to the server's
-      // value via its `key` prop. Without this, a rejected edit stays
-      // visible in the DOM even though the database still holds the old
-      // value, so it could get silently flattened into the final document.
-      // Reload so the input remounts showing the actual (unchanged) value.
+      // value when it remounts, which only happens when its `key` prop
+      // changes. loadSession() bumps reloadNonce (part of the key)
+      // unconditionally, so this forces a remount even though the server
+      // value itself is unchanged on a rejected save — without that, a
+      // rejected edit would stay visible in the DOM even though the
+      // database still holds the old value, and could get silently
+      // flattened into the final document.
       loadSession();
       return;
     }
@@ -258,7 +274,7 @@ export function SignClient({ token }: SignClientProps) {
                     )}
                     {field.type === 'TEXT' && (
                       <input
-                        key={`${field.id}-${field.value?.textValue ?? 'empty'}`}
+                        key={`${field.id}-${reloadNonce}`}
                         defaultValue={field.value?.textValue ?? ''}
                         onBlur={(event) => saveTextValue(field.id, event.target.value)}
                         className="h-full w-full bg-transparent px-1 text-[10px] outline-none"
@@ -266,6 +282,7 @@ export function SignClient({ token }: SignClientProps) {
                     )}
                     {field.type === 'CHECKBOX' && (
                       <input
+                        key={`${field.id}-${reloadNonce}`}
                         type="checkbox"
                         defaultChecked={field.value?.checked ?? false}
                         onChange={(event) => saveChecked(field.id, event.target.checked)}

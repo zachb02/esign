@@ -11,7 +11,7 @@ export async function GET(
   if (!document) {
     return NextResponse.json({ error: 'Document not found' }, { status: 404 });
   }
-  const bytes = await getDocumentStorage().read(document.storageKey);
+  const bytes = await getDocumentStorage().read(document.completedPdfKey ?? document.storageKey);
   return new NextResponse(bytes, {
     headers: {
       'Content-Type': 'application/pdf',

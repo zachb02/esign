@@ -9,6 +9,7 @@ import * as documentsRoute from '@/app/api/documents/route';
 import * as documentRoute from '@/app/api/documents/[id]/route';
 import * as fileRoute from '@/app/api/documents/[id]/file/route';
 import * as thumbnailRoute from '@/app/api/documents/[id]/thumbnail/route';
+import { getDocumentStorage } from '@/lib/storage';
 
 let dataDir: string;
 
@@ -118,5 +119,22 @@ describe('documents API', () => {
       params: Promise.resolve({ id: document.id }),
     });
     expect((await patchResponse.json()).folderId).toBe(folder.id);
+  });
+
+  it('serves the completedPdfKey instead of the original storageKey once set', async () => {
+    const { body: document } = await uploadPdf('completed-source.pdf', 1);
+    const completedBytes = Buffer.from('%PDF-1.4\ncompleted-marker');
+    await getDocumentStorage().save('completed-marker.pdf', completedBytes);
+    await prisma.document.update({
+      where: { id: document.id },
+      data: { completedPdfKey: 'completed-marker.pdf' },
+    });
+
+    const fileRequest = new NextRequest(`http://localhost/api/documents/${document.id}/file`);
+    const fileResponse = await fileRoute.GET(fileRequest, {
+      params: Promise.resolve({ id: document.id }),
+    });
+    const bytes = Buffer.from(await fileResponse.arrayBuffer());
+    expect(bytes.equals(completedBytes)).toBe(true);
   });
 });

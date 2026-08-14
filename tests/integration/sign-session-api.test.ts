@@ -11,6 +11,14 @@ import * as declineRoute from '@/app/api/sign/[token]/decline/route';
 import { getDocumentStorage } from '@/lib/storage';
 import { makeTestPdf } from '../fixtures/make-test-pdf';
 
+// A real, minimal 1x1 transparent PNG — used anywhere a test needs a
+// signature upload that must survive real pdf-lib validation (isPngFlattenable
+// / flattenPdf's embedPng call), not just a magic-bytes-only fake.
+const REAL_1X1_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64'
+);
+
 let dataDir: string;
 
 beforeAll(() => {
@@ -192,11 +200,11 @@ describe('PATCH /api/sign/:token/fields/:fieldId', () => {
     });
 
     const formData = new FormData();
-    const pngBytes = Buffer.concat([
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-      Buffer.from([1, 2, 3, 4]),
-    ]);
-    formData.append('image', new File([pngBytes], 'sig.png', { type: 'image/png' }));
+    // A real, minimal 1x1 PNG — must be genuinely valid, not just carry the
+    // right magic bytes, since the route now validates via a real pdf-lib
+    // embedPng() round-trip (see the flattenable-validation describe block
+    // below for the case that specifically exercises magic-bytes-only fakes).
+    formData.append('image', new File([REAL_1X1_PNG], 'sig.png', { type: 'image/png' }));
     const request = new NextRequest(`http://localhost/api/sign/sig-token/fields/${field.id}`, {
       method: 'PATCH',
       body: formData,
@@ -423,6 +431,120 @@ describe('PATCH /api/sign/:token/fields/:fieldId', () => {
     });
     const response = await fieldValueRoute.PATCH(request, {
       params: Promise.resolve({ token: 'badpng-token', fieldId: field.id }),
+    });
+    expect(response.status).toBe(400);
+    const value = await prisma.fieldValue.findUnique({ where: { fieldId: field.id } });
+    expect(value).toBeNull();
+  });
+
+  it('rejects a TEXT value containing a control character the old Latin-1 regex would have accepted', async () => {
+    // The OLD validation was /[^\x00-\xFF]/ — anything in 0x00-0xFF passed,
+    // including 0x0E, which is one of the 58 code points pdf-lib's real
+    // WinAnsi-encoded Helvetica font throws on when flatten.ts actually
+    // tries to draw it (verified directly against the installed pdf-lib:
+    // page.drawText() rejects it). isTextFlattenable must reject it too.
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-ctrlchar',
+        storageKey: 'h-ctrlchar.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'ctrlchar-token',
+      },
+    });
+
+    const request = new NextRequest(`http://localhost/api/sign/ctrlchar-token/fields/${field.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textValue: 'Bad\x0Evalue' }),
+    });
+    const response = await fieldValueRoute.PATCH(request, {
+      params: Promise.resolve({ token: 'ctrlchar-token', fieldId: field.id }),
+    });
+    expect(response.status).toBe(400);
+    const value = await prisma.fieldValue.findUnique({ where: { fieldId: field.id } });
+    expect(value).toBeNull();
+  });
+
+  it('rejects a signature upload with valid PNG magic bytes but a corrupt body', async () => {
+    // The OLD validation checked only the 8-byte magic number. A buffer with
+    // a valid header but a corrupt/incomplete body passed that check, got
+    // stored, and only failed silently at flatten time. The real gate must
+    // be whether pdf-lib can actually embed it.
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-corruptpng',
+        storageKey: 'h-corruptpng.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'SIGNATURE',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.25,
+        height: 0.06,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'corruptpng-token',
+      },
+    });
+
+    const formData = new FormData();
+    const corruptPng = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+    ]);
+    formData.append('image', new File([corruptPng], 'sig.png', { type: 'image/png' }));
+    const request = new NextRequest(`http://localhost/api/sign/corruptpng-token/fields/${field.id}`, {
+      method: 'PATCH',
+      body: formData,
+    });
+    const response = await fieldValueRoute.PATCH(request, {
+      params: Promise.resolve({ token: 'corruptpng-token', fieldId: field.id }),
     });
     expect(response.status).toBe(400);
     const value = await prisma.fieldValue.findUnique({ where: { fieldId: field.id } });

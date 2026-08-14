@@ -2,11 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { getSignatureStorage } from '@/lib/storage';
 import { sha256Hex } from '@/lib/pdf/hash';
-
-// pdf-lib draws TEXT with the WinAnsi-encoded StandardFonts.Helvetica font,
-// which throws on any character outside Latin-1. Reject those up front so a
-// bad value can never reach flattenPdf and brick a document at completion.
-const NON_WINANSI_CHAR = /[^\x00-\xFF]/;
+import { isPngFlattenable, isTextFlattenable } from '@/lib/pdf/flattenable';
 
 const PNG_MAGIC_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MAX_SIGNATURE_UPLOAD_BYTES = 2 * 1024 * 1024; // 2MB
@@ -69,6 +65,13 @@ export async function PATCH(
     if (!isPngBuffer(buffer)) {
       return NextResponse.json({ error: 'File is not a valid PNG image' }, { status: 400 });
     }
+    // The magic-bytes check above is a cheap pre-filter; the real gate is
+    // whether pdf-lib can actually embed it, since a valid header with a
+    // corrupt body would otherwise pass here and only fail silently at
+    // flatten time (see src/lib/pdf/flattenable.ts).
+    if (!(await isPngFlattenable(buffer))) {
+      return NextResponse.json({ error: 'File is not a valid PNG image' }, { status: 400 });
+    }
     const key = `${sha256Hex(buffer)}.png`;
     await getSignatureStorage().save(key, buffer);
     data.signatureImageKey = key;
@@ -79,7 +82,10 @@ export async function PATCH(
         return NextResponse.json({ error: 'textValue is required' }, { status: 400 });
       }
       const trimmed = body.textValue.trim();
-      if (trimmed && NON_WINANSI_CHAR.test(trimmed)) {
+      // Validate against the actual pdf-lib draw call flattening will make,
+      // not an approximation — see src/lib/pdf/flattenable.ts for why a
+      // Latin-1 regex isn't equivalent to what the font can really encode.
+      if (trimmed && !(await isTextFlattenable(trimmed))) {
         return NextResponse.json(
           { error: 'Please use only standard Latin characters (accents are fine)' },
           { status: 400 }

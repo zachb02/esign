@@ -75,15 +75,22 @@ export async function PATCH(
   } else {
     const body = await request.json();
     if (field.type === 'TEXT') {
-      if (typeof body.textValue !== 'string' || !body.textValue.trim()) {
+      if (typeof body.textValue !== 'string') {
         return NextResponse.json({ error: 'textValue is required' }, { status: 400 });
       }
       const trimmed = body.textValue.trim();
-      if (NON_WINANSI_CHAR.test(trimmed)) {
+      if (trimmed && NON_WINANSI_CHAR.test(trimmed)) {
         return NextResponse.json(
           { error: 'Please use only standard Latin characters (accents are fine)' },
           { status: 400 }
         );
+      }
+      if (!trimmed) {
+        // Empty/whitespace-only value means "clear this field" rather than a
+        // validation error — remove any existing FieldValue row so
+        // required-field checks at complete-time correctly see it as unfilled.
+        await prisma.fieldValue.deleteMany({ where: { fieldId: field.id } });
+        return NextResponse.json({ fieldId: field.id, cleared: true });
       }
       data.textValue = trimmed;
     } else if (field.type === 'CHECKBOX') {

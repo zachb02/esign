@@ -95,11 +95,16 @@ export function SignClient({ token }: SignClientProps) {
   }, [numPages, renderPage]);
 
   async function saveTextValue(fieldId: string, textValue: string) {
-    await fetch(`/api/sign/${token}/fields/${fieldId}`, {
+    const response = await fetch(`/api/sign/${token}/fields/${fieldId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ textValue }),
     });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Failed to save value' }));
+      window.alert(body.error ?? 'Failed to save value');
+      return;
+    }
     loadSession();
   }
 
@@ -236,6 +241,7 @@ export function SignClient({ token }: SignClientProps) {
                     )}
                     {field.type === 'TEXT' && (
                       <input
+                        key={`${field.id}-${field.value?.textValue ?? 'empty'}`}
                         defaultValue={field.value?.textValue ?? ''}
                         onBlur={(event) => saveTextValue(field.id, event.target.value)}
                         className="h-full w-full bg-transparent px-1 text-[10px] outline-none"

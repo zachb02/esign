@@ -321,6 +321,60 @@ describe('PATCH /api/sign/:token/fields/:fieldId', () => {
     expect(value?.textValue).toBe('José Núñez');
   });
 
+  it('clears a TEXT field (deletes the FieldValue row) when sent an empty/whitespace-only value', async () => {
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-clear',
+        storageKey: 'h-clear.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+        required: true,
+      },
+    });
+    const recipient = await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'clear-token',
+      },
+    });
+    await prisma.fieldValue.create({
+      data: { fieldId: field.id, recipientId: recipient.id, textValue: 'Old Value' },
+    });
+
+    const request = new NextRequest(`http://localhost/api/sign/clear-token/fields/${field.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textValue: '   ' }),
+    });
+    const response = await fieldValueRoute.PATCH(request, {
+      params: Promise.resolve({ token: 'clear-token', fieldId: field.id }),
+    });
+    expect(response.status).toBe(200);
+    const value2 = await prisma.fieldValue.findUnique({ where: { fieldId: field.id } });
+    expect(value2).toBeNull();
+  });
+
   it('rejects a signature upload whose bytes are not a valid PNG', async () => {
     const document = await prisma.document.create({
       data: {

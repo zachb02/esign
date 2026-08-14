@@ -94,7 +94,21 @@ export async function POST(
         for (const field of allFields) {
           let signaturePng: Buffer | null = null;
           if (field.value?.signatureImageKey) {
-            signaturePng = await getSignatureStorage().read(field.value.signatureImageKey);
+            // Same graceful-degradation semantics as flattenPdf's internal
+            // per-field try/catch: a missing/corrupt signature file must
+            // never abort the whole flatten attempt (which would leave the
+            // document permanently stuck — every recipient is already
+            // SIGNED by this point, and `complete` rejects non-PENDING
+            // recipients, so there'd be no way to retry). Log and simply
+            // omit this one field instead.
+            try {
+              signaturePng = await getSignatureStorage().read(field.value.signatureImageKey);
+            } catch (error) {
+              console.error(
+                `Failed to read signature file ${field.value.signatureImageKey} for field ${field.id} during flatten, skipping`,
+                error
+              );
+            }
           }
           flattenInputs.push({
             type: field.type,

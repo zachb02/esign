@@ -1083,6 +1083,81 @@ describe('POST /api/sign/:token/complete', () => {
     expect(reloadedDocument?.status).toBe('IN_PROGRESS');
     expect(reloadedDocument?.completedPdfKey).toBeNull();
   });
+
+  it('completes successfully even when a signature field points at a file missing from storage', async () => {
+    // The read call for a signature file used to happen outside flatten.ts's
+    // per-field try/catch, so a missing/unreadable file threw and aborted
+    // the ENTIRE flatten for the whole document — landing in the outer
+    // catch's IN_PROGRESS fallback. By that point every recipient is
+    // already SIGNED, and `complete` rejects non-PENDING recipients, so the
+    // document was permanently stuck. The read must now be guarded the same
+    // way flatten.ts's own draw calls are: log and omit just that field.
+    const pdfBytes = await makeTestPdf(1);
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-missing-sig',
+        storageKey: 'h-missing-sig.pdf',
+        pageCount: 1,
+        fileSizeBytes: pdfBytes.byteLength,
+        status: 'SENT',
+      },
+    });
+    await getDocumentStorage().save('h-missing-sig.pdf', pdfBytes);
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'SIGNATURE',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.25,
+        height: 0.06,
+        required: true,
+      },
+    });
+    const recipient = await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'missing-sig-token',
+      },
+    });
+    // A FieldValue row exists (satisfies the required-field check) but its
+    // signatureImageKey points at a file that was never written to storage.
+    await prisma.fieldValue.create({
+      data: {
+        fieldId: field.id,
+        recipientId: recipient.id,
+        signatureImageKey: 'does-not-exist-on-disk.png',
+      },
+    });
+
+    const request = new NextRequest('http://localhost/api/sign/missing-sig-token/complete', {
+      method: 'POST',
+    });
+    const response = await completeRoute.POST(request, {
+      params: Promise.resolve({ token: 'missing-sig-token' }),
+    });
+    expect(response.status).toBe(200);
+
+    const reloadedRecipient = await prisma.recipient.findUnique({ where: { id: recipient.id } });
+    expect(reloadedRecipient?.status).toBe('SIGNED');
+
+    const reloadedDocument = await prisma.document.findUnique({ where: { id: document.id } });
+    expect(reloadedDocument?.status).toBe('COMPLETED');
+    expect(reloadedDocument?.completedPdfKey).not.toBeNull();
+
+    const flattenedBytes = await getDocumentStorage().read(reloadedDocument!.completedPdfKey!);
+    expect(flattenedBytes.subarray(0, 5).toString()).toBe('%PDF-');
+  });
 });
 
 describe('POST /api/sign/:token/decline', () => {

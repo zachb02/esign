@@ -1416,4 +1416,112 @@ describe('Document.status transition race guards', () => {
     expect(reloadedDocument?.status).toBe('COMPLETED');
     expect(reloadedDocument?.completedPdfKey).toBe('some-other-completed-key.pdf');
   });
+
+  it('does not overwrite an already-COMPLETED document when the LAST pending recipient completes and flatten succeeds', async () => {
+    // Deterministic reproduction of the race at the DB layer: the document
+    // has already been finalized COMPLETED (e.g. by a concurrent request),
+    // but this recipient is the last one still PENDING, so `complete`
+    // reaches the remainingPending === 0 branch and attempts the guarded
+    // `updateMany({ status: 'COMPLETED', completedPdfKey })` write. Even
+    // though flatten itself succeeds here, the write must no-op: the
+    // document's pre-existing status and completedPdfKey must survive
+    // untouched, and the new flatten's output must not clobber them.
+    const pdfBytes = await makeTestPdf(1);
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-race-completed-success',
+        storageKey: 'h-race-completed-success.pdf',
+        pageCount: 1,
+        fileSizeBytes: pdfBytes.byteLength,
+        status: 'COMPLETED',
+        completedPdfKey: 'pre-existing-completed-key.pdf',
+      },
+    });
+    await getDocumentStorage().save('h-race-completed-success.pdf', pdfBytes);
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const recipient = await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'race-completed-success-token',
+      },
+    });
+
+    const request = new NextRequest(
+      'http://localhost/api/sign/race-completed-success-token/complete',
+      { method: 'POST' }
+    );
+    const response = await completeRoute.POST(request, {
+      params: Promise.resolve({ token: 'race-completed-success-token' }),
+    });
+    expect(response.status).toBe(200);
+
+    const reloadedRecipient = await prisma.recipient.findUnique({ where: { id: recipient.id } });
+    expect(reloadedRecipient?.status).toBe('SIGNED');
+
+    const reloadedDocument = await prisma.document.findUnique({ where: { id: document.id } });
+    expect(reloadedDocument?.status).toBe('COMPLETED');
+    // The guarded write no-op'd: the ORIGINAL completedPdfKey survives, not
+    // whatever key the (wasted) flatten in this request would have produced.
+    expect(reloadedDocument?.completedPdfKey).toBe('pre-existing-completed-key.pdf');
+  });
+
+  it('does not overwrite an already-COMPLETED document with IN_PROGRESS when the LAST pending recipient completes and flatten fails', async () => {
+    // Same race, but flatten itself also fails (corrupt PDF bytes, same
+    // technique as the flatten-failure test above), so `complete` reaches
+    // the catch block's guarded `updateMany({ status: 'IN_PROGRESS' })`
+    // write. That write must also no-op against an already-COMPLETED
+    // document rather than regressing it.
+    const corruptPdf = Buffer.concat([
+      Buffer.from('%PDF-1.7\n'),
+      Buffer.from('this is not real pdf content, just garbage bytes after the magic header'),
+    ]);
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-race-completed-failure',
+        storageKey: 'h-race-completed-failure.pdf',
+        pageCount: 1,
+        fileSizeBytes: corruptPdf.byteLength,
+        status: 'COMPLETED',
+        completedPdfKey: 'pre-existing-completed-key-2.pdf',
+      },
+    });
+    await getDocumentStorage().save('h-race-completed-failure.pdf', corruptPdf);
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const recipient = await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'race-completed-failure-token',
+      },
+    });
+
+    const request = new NextRequest(
+      'http://localhost/api/sign/race-completed-failure-token/complete',
+      { method: 'POST' }
+    );
+    const response = await completeRoute.POST(request, {
+      params: Promise.resolve({ token: 'race-completed-failure-token' }),
+    });
+    expect(response.status).toBe(200);
+
+    const reloadedRecipient = await prisma.recipient.findUnique({ where: { id: recipient.id } });
+    expect(reloadedRecipient?.status).toBe('SIGNED');
+
+    const reloadedDocument = await prisma.document.findUnique({ where: { id: document.id } });
+    expect(reloadedDocument?.status).toBe('COMPLETED');
+    expect(reloadedDocument?.completedPdfKey).toBe('pre-existing-completed-key-2.pdf');
+  });
 });

@@ -482,6 +482,176 @@ describe('PATCH /api/sign/:token/fields/:fieldId', () => {
     expect(response.status).toBe(400);
   });
 
+  it('rejects a PATCH using recipient A\'s token against recipient B\'s field on the same document', async () => {
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-crossrecip',
+        storageKey: 'h-crossrecip.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const roleA = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer A', order: 0, colorIndex: 0 },
+    });
+    const roleB = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer B', order: 1, colorIndex: 1 },
+    });
+    const fieldA = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleA.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+      },
+    });
+    const fieldB = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleB.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.3,
+        y: 0.3,
+        width: 0.2,
+        height: 0.04,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleA.id,
+        name: 'A',
+        email: 'a@example.com',
+        signingToken: 'crossrecip-a',
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleB.id,
+        name: 'B',
+        email: 'b@example.com',
+        signingToken: 'crossrecip-b',
+      },
+    });
+
+    // Sanity: A's token can patch A's own field.
+    const ownRequest = new NextRequest(`http://localhost/api/sign/crossrecip-a/fields/${fieldA.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textValue: 'A signs here' }),
+    });
+    const ownResponse = await fieldValueRoute.PATCH(ownRequest, {
+      params: Promise.resolve({ token: 'crossrecip-a', fieldId: fieldA.id }),
+    });
+    expect(ownResponse.status).toBe(200);
+
+    // A's token must NOT be able to patch B's field.
+    const crossRequest = new NextRequest(`http://localhost/api/sign/crossrecip-a/fields/${fieldB.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textValue: 'Should be rejected' }),
+    });
+    const crossResponse = await fieldValueRoute.PATCH(crossRequest, {
+      params: Promise.resolve({ token: 'crossrecip-a', fieldId: fieldB.id }),
+    });
+    expect(crossResponse.status).toBe(404);
+    const bValue = await prisma.fieldValue.findUnique({ where: { fieldId: fieldB.id } });
+    expect(bValue).toBeNull();
+  });
+
+  it('rejects a PATCH using document 1\'s recipient token against a field on document 2', async () => {
+    const document1 = await prisma.document.create({
+      data: {
+        title: 'D1',
+        originalFilename: 'd1.pdf',
+        fileHash: 'h-crossdoc-1',
+        storageKey: 'h-crossdoc-1.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const document2 = await prisma.document.create({
+      data: {
+        title: 'D2',
+        originalFilename: 'd2.pdf',
+        fileHash: 'h-crossdoc-2',
+        storageKey: 'h-crossdoc-2.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role1 = await prisma.signerRole.create({
+      data: { documentId: document1.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const role2 = await prisma.signerRole.create({
+      data: { documentId: document2.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    await prisma.field.create({
+      data: {
+        documentId: document1.id,
+        signerRoleId: role1.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+      },
+    });
+    const field2 = await prisma.field.create({
+      data: {
+        documentId: document2.id,
+        signerRoleId: role2.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document1.id,
+        signerRoleId: role1.id,
+        name: 'A',
+        email: 'a@example.com',
+        signingToken: 'crossdoc-1',
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document2.id,
+        signerRoleId: role2.id,
+        name: 'B',
+        email: 'b@example.com',
+        signingToken: 'crossdoc-2',
+      },
+    });
+
+    const request = new NextRequest(`http://localhost/api/sign/crossdoc-1/fields/${field2.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textValue: 'Should be rejected' }),
+    });
+    const response = await fieldValueRoute.PATCH(request, {
+      params: Promise.resolve({ token: 'crossdoc-1', fieldId: field2.id }),
+    });
+    expect(response.status).toBe(404);
+    const value = await prisma.fieldValue.findUnique({ where: { fieldId: field2.id } });
+    expect(value).toBeNull();
+  });
 });
 
 describe('POST /api/sign/:token/complete', () => {

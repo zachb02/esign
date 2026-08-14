@@ -14,3 +14,7 @@ export function getDocumentsDir(): string {
 export function getThumbnailsDir(): string {
   return path.join(getAppDataDir(), 'thumbnails');
 }
+
+export function getSignaturesDir(): string {
+  return path.join(getAppDataDir(), 'signatures');
+}

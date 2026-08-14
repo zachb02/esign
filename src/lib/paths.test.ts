@@ -1,7 +1,7 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
-import { getAppDataDir, getDocumentsDir, getThumbnailsDir } from './paths';
+import { getAppDataDir, getDocumentsDir, getThumbnailsDir, getSignaturesDir } from './paths';
 
 describe('paths', () => {
   afterEach(() => {
@@ -23,5 +23,10 @@ describe('paths', () => {
     process.env.ESIGN_DATA_DIR = '/tmp/esign-test-override';
     expect(getDocumentsDir()).toBe('/tmp/esign-test-override/documents');
     expect(getThumbnailsDir()).toBe('/tmp/esign-test-override/thumbnails');
+  });
+
+  it('nests signatures under the app data dir', () => {
+    process.env.ESIGN_DATA_DIR = '/tmp/esign-test-override';
+    expect(getSignaturesDir()).toBe('/tmp/esign-test-override/signatures');
   });
 });

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db/prisma';
 import * as sessionRoute from '@/app/api/sign/[token]/route';
 import * as fieldValueRoute from '@/app/api/sign/[token]/fields/[fieldId]/route';
 import * as completeRoute from '@/app/api/sign/[token]/complete/route';
+import * as declineRoute from '@/app/api/sign/[token]/decline/route';
 import { getDocumentStorage } from '@/lib/storage';
 import { makeTestPdf } from '../fixtures/make-test-pdf';
 
@@ -511,5 +512,87 @@ describe('POST /api/sign/:token/complete', () => {
     const reloadedDocument = await prisma.document.findUnique({ where: { id: document.id } });
     expect(reloadedDocument?.status).toBe('IN_PROGRESS');
     expect(reloadedDocument?.completedPdfKey).toBeNull();
+  });
+});
+
+describe('POST /api/sign/:token/decline', () => {
+  it('declines a recipient and sets the document to DECLINED', async () => {
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h10',
+        storageKey: 'h10.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const recipient = await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'decline-token',
+      },
+    });
+
+    const request = new NextRequest('http://localhost/api/sign/decline-token/decline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: 'Terms have changed' }),
+    });
+    const response = await declineRoute.POST(request, {
+      params: Promise.resolve({ token: 'decline-token' }),
+    });
+    expect(response.status).toBe(200);
+
+    const reloadedRecipient = await prisma.recipient.findUnique({ where: { id: recipient.id } });
+    expect(reloadedRecipient?.status).toBe('DECLINED');
+    expect(reloadedRecipient?.declineReason).toBe('Terms have changed');
+
+    const reloadedDocument = await prisma.document.findUnique({ where: { id: document.id } });
+    expect(reloadedDocument?.status).toBe('DECLINED');
+  });
+
+  it('rejects declining an already-finished recipient', async () => {
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h11',
+        storageKey: 'h11.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'already-signed-token',
+        status: 'SIGNED',
+      },
+    });
+
+    const request = new NextRequest('http://localhost/api/sign/already-signed-token/decline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const response = await declineRoute.POST(request, {
+      params: Promise.resolve({ token: 'already-signed-token' }),
+    });
+    expect(response.status).toBe(400);
   });
 });

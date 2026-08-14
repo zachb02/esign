@@ -46,31 +46,51 @@ export function SignClient({ token }: SignClientProps) {
   const [numPages, setNumPages] = useState(0);
   const [activeSignatureFieldId, setActiveSignatureFieldId] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
-  // Bumped on every loadSession() call, unconditionally. The TEXT and
-  // CHECKBOX inputs below are uncontrolled (defaultValue/defaultChecked) and
-  // only resync to the server's truth when React actually remounts them —
-  // which React only does when their `key` changes. Deriving the key purely
-  // from the field's server value doesn't work: after a rejected save, the
-  // server value is unchanged, so the key would be byte-identical to before
-  // and React would leave the stale, rejected DOM value on screen. Folding
-  // this nonce into the key forces a remount on every reload regardless of
-  // whether the underlying value actually changed, guaranteeing the fresh
-  // defaultValue/defaultChecked is read from the server on every attempt.
-  const [reloadNonce, setReloadNonce] = useState(0);
+  // Keyed by field.id, bumped only for the ONE field whose own save attempt
+  // just resolved (success or failure). The TEXT and CHECKBOX inputs below
+  // are uncontrolled (defaultValue/defaultChecked) and only resync to the
+  // server's truth when React actually remounts them — which React only
+  // does when their `key` changes. Deriving the key purely from the field's
+  // server value doesn't work: after a rejected save, the server value is
+  // unchanged, so the key would be byte-identical to before and React would
+  // leave the stale, rejected DOM value on screen. Folding a per-field nonce
+  // into that field's key forces a remount on every reload of THAT field
+  // regardless of whether its underlying value actually changed, guaranteeing
+  // the fresh defaultValue/defaultChecked is read from the server on every
+  // attempt.
+  //
+  // This MUST stay per-field rather than a single shared counter: a shared
+  // counter bumped by field A's save would remount every OTHER field's input
+  // too, discarding any in-progress, not-yet-saved edit the signer just made
+  // in field B and silently reverting it to the stale server value — the
+  // exact class of bug this whole mechanism exists to prevent, just aimed at
+  // a different field.
+  const [reloadNonces, setReloadNonces] = useState<Record<string, number>>({});
+  const bumpReloadNonce = useCallback((fieldId: string) => {
+    setReloadNonces((prev) => ({ ...prev, [fieldId]: (prev[fieldId] ?? 0) + 1 }));
+  }, []);
   const pageRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
 
-  const loadSession = useCallback(async () => {
-    const response = await fetch(`/api/sign/${token}`);
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({ error: 'Signing link not found' }));
-      setLoadError(body.error ?? 'Signing link not found');
-      setReloadNonce((n) => n + 1);
-      return;
-    }
-    setSession(await response.json());
-    setReloadNonce((n) => n + 1);
-  }, [token]);
+  // `fieldId` is the field whose own save attempt just resolved, if any —
+  // omitted for reloads that aren't targeting a specific field (initial page
+  // load, complete, decline). When present, only that field's remount
+  // counter is bumped, so one field's save can never force another field's
+  // input to remount and lose an in-progress, unsaved edit.
+  const loadSession = useCallback(
+    async (fieldId?: string) => {
+      const response = await fetch(`/api/sign/${token}`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: 'Signing link not found' }));
+        setLoadError(body.error ?? 'Signing link not found');
+        if (fieldId) bumpReloadNonce(fieldId);
+        return;
+      }
+      setSession(await response.json());
+      if (fieldId) bumpReloadNonce(fieldId);
+    },
+    [token, bumpReloadNonce]
+  );
 
   useEffect(() => {
     loadSession();
@@ -118,16 +138,17 @@ export function SignClient({ token }: SignClientProps) {
       window.alert(body.error ?? 'Failed to save value');
       // The TEXT input is uncontrolled and only resyncs to the server's
       // value when it remounts, which only happens when its `key` prop
-      // changes. loadSession() bumps reloadNonce (part of the key)
-      // unconditionally, so this forces a remount even though the server
-      // value itself is unchanged on a rejected save — without that, a
-      // rejected edit would stay visible in the DOM even though the
-      // database still holds the old value, and could get silently
-      // flattened into the final document.
-      loadSession();
+      // changes. loadSession(fieldId) bumps that field's own remount
+      // counter (part of its key) unconditionally, so this forces a remount
+      // even though the server value itself is unchanged on a rejected save
+      // — without that, a rejected edit would stay visible in the DOM even
+      // though the database still holds the old value, and could get
+      // silently flattened into the final document. Scoped to this fieldId
+      // only, so it never touches any other field's input.
+      loadSession(fieldId);
       return;
     }
-    loadSession();
+    loadSession(fieldId);
   }
 
   async function saveChecked(fieldId: string, checked: boolean) {
@@ -140,7 +161,7 @@ export function SignClient({ token }: SignClientProps) {
       const body = await response.json().catch(() => ({ error: 'Failed to save value' }));
       window.alert(body.error ?? 'Failed to save value');
     }
-    loadSession();
+    loadSession(fieldId);
   }
 
   async function saveSignature(fieldId: string, blob: Blob) {
@@ -155,9 +176,14 @@ export function SignClient({ token }: SignClientProps) {
       const body = await response.json().catch(() => ({ error: 'Failed to save signature' }));
       window.alert(body.error ?? 'Failed to save signature');
     }
-    loadSession();
+    loadSession(fieldId);
   }
 
+  // Complete/decline aren't scoped to a single field — they end the signing
+  // session (redirect to a terminal "signed"/"declined" screen or an error),
+  // so there's no live input on screen afterwards that needs a targeted
+  // remount. Reloading without a fieldId intentionally leaves every field's
+  // remount counter untouched.
   async function handleComplete() {
     setCompleting(true);
     const response = await fetch(`/api/sign/${token}/complete`, { method: 'POST' });
@@ -274,7 +300,7 @@ export function SignClient({ token }: SignClientProps) {
                     )}
                     {field.type === 'TEXT' && (
                       <input
-                        key={`${field.id}-${reloadNonce}`}
+                        key={`${field.id}-${reloadNonces[field.id] ?? 0}`}
                         defaultValue={field.value?.textValue ?? ''}
                         onBlur={(event) => saveTextValue(field.id, event.target.value)}
                         className="h-full w-full bg-transparent px-1 text-[10px] outline-none"
@@ -282,7 +308,7 @@ export function SignClient({ token }: SignClientProps) {
                     )}
                     {field.type === 'CHECKBOX' && (
                       <input
-                        key={`${field.id}-${reloadNonce}`}
+                        key={`${field.id}-${reloadNonces[field.id] ?? 0}`}
                         type="checkbox"
                         defaultChecked={field.value?.checked ?? false}
                         onChange={(event) => saveChecked(field.id, event.target.checked)}

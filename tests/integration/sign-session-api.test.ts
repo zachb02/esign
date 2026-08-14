@@ -3,6 +3,9 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import * as sessionRoute from '@/app/api/sign/[token]/route';
 import * as fieldValueRoute from '@/app/api/sign/[token]/fields/[fieldId]/route';
+import * as completeRoute from '@/app/api/sign/[token]/complete/route';
+import { getDocumentStorage } from '@/lib/storage';
+import { makeTestPdf } from '../fixtures/make-test-pdf';
 
 beforeEach(async () => {
   await prisma.fieldValue.deleteMany();
@@ -199,5 +202,248 @@ describe('PATCH /api/sign/:token/fields/:fieldId', () => {
       params: Promise.resolve({ token: 'nope', fieldId: 'whatever' }),
     });
     expect(response.status).toBe(404);
+  });
+});
+
+describe('POST /api/sign/:token/complete', () => {
+  it('rejects completion when a required field is missing a value', async () => {
+    const pdfBytes = await makeTestPdf(1);
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h6',
+        storageKey: 'h6.pdf',
+        pageCount: 1,
+        fileSizeBytes: pdfBytes.byteLength,
+        status: 'SENT',
+      },
+    });
+    await getDocumentStorage().save('h6.pdf', pdfBytes);
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+        required: true,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'incomplete-token',
+      },
+    });
+
+    const request = new NextRequest('http://localhost/api/sign/incomplete-token/complete', {
+      method: 'POST',
+    });
+    const response = await completeRoute.POST(request, {
+      params: Promise.resolve({ token: 'incomplete-token' }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it('completes a single-recipient document, flattens the PDF, and marks it COMPLETED', async () => {
+    const pdfBytes = await makeTestPdf(1);
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h7',
+        storageKey: 'h7.pdf',
+        pageCount: 1,
+        fileSizeBytes: pdfBytes.byteLength,
+        status: 'SENT',
+      },
+    });
+    await getDocumentStorage().save('h7.pdf', pdfBytes);
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+        required: true,
+      },
+    });
+    const recipient = await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'complete-token',
+      },
+    });
+    await prisma.fieldValue.create({
+      data: { fieldId: field.id, recipientId: recipient.id, textValue: 'Jane Doe' },
+    });
+
+    const request = new NextRequest('http://localhost/api/sign/complete-token/complete', {
+      method: 'POST',
+    });
+    const response = await completeRoute.POST(request, {
+      params: Promise.resolve({ token: 'complete-token' }),
+    });
+    expect(response.status).toBe(200);
+
+    const reloadedRecipient = await prisma.recipient.findUnique({ where: { id: recipient.id } });
+    expect(reloadedRecipient?.status).toBe('SIGNED');
+    expect(reloadedRecipient?.signedAt).not.toBeNull();
+
+    const reloadedDocument = await prisma.document.findUnique({ where: { id: document.id } });
+    expect(reloadedDocument?.status).toBe('COMPLETED');
+    expect(reloadedDocument?.completedPdfKey).not.toBeNull();
+
+    const flattenedBytes = await getDocumentStorage().read(reloadedDocument!.completedPdfKey!);
+    expect(flattenedBytes.subarray(0, 5).toString()).toBe('%PDF-');
+  });
+
+  it('sets status to IN_PROGRESS when one of two recipients completes', async () => {
+    const pdfBytes = await makeTestPdf(1);
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h8',
+        storageKey: 'h8.pdf',
+        pageCount: 1,
+        fileSizeBytes: pdfBytes.byteLength,
+        status: 'SENT',
+      },
+    });
+    await getDocumentStorage().save('h8.pdf', pdfBytes);
+    const roleA = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const roleB = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 2', order: 1, colorIndex: 1 },
+    });
+    await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleA.id,
+        type: 'CHECKBOX',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.03,
+        height: 0.03,
+        required: false,
+      },
+    });
+    await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleB.id,
+        type: 'CHECKBOX',
+        page: 1,
+        x: 0.2,
+        y: 0.2,
+        width: 0.03,
+        height: 0.03,
+        required: false,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleA.id,
+        name: 'A',
+        email: 'a@example.com',
+        signingToken: 'two-recipients-a',
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: roleB.id,
+        name: 'B',
+        email: 'b@example.com',
+        signingToken: 'two-recipients-b',
+      },
+    });
+
+    const request = new NextRequest('http://localhost/api/sign/two-recipients-a/complete', {
+      method: 'POST',
+    });
+    const response = await completeRoute.POST(request, {
+      params: Promise.resolve({ token: 'two-recipients-a' }),
+    });
+    expect(response.status).toBe(200);
+
+    const reloadedDocument = await prisma.document.findUnique({ where: { id: document.id } });
+    expect(reloadedDocument?.status).toBe('IN_PROGRESS');
+  });
+
+  it('auto-fills a DATE_SIGNED field on completion', async () => {
+    const pdfBytes = await makeTestPdf(1);
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h9',
+        storageKey: 'h9.pdf',
+        pageCount: 1,
+        fileSizeBytes: pdfBytes.byteLength,
+        status: 'SENT',
+      },
+    });
+    await getDocumentStorage().save('h9.pdf', pdfBytes);
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const dateField = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'DATE_SIGNED',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.15,
+        height: 0.04,
+        required: true,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'date-token',
+      },
+    });
+
+    const request = new NextRequest('http://localhost/api/sign/date-token/complete', {
+      method: 'POST',
+    });
+    const response = await completeRoute.POST(request, {
+      params: Promise.resolve({ token: 'date-token' }),
+    });
+    expect(response.status).toBe(200);
+
+    const value = await prisma.fieldValue.findUnique({ where: { fieldId: dateField.id } });
+    expect(value?.dateValue).not.toBeNull();
   });
 });

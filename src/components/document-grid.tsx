@@ -10,6 +10,8 @@ export interface DocumentSummary {
   thumbnailKey: string | null;
   updatedAt: string;
   folderId: string | null;
+  recipientCount?: number;
+  signedCount?: number;
 }
 
 interface DocumentGridProps {
@@ -97,13 +99,27 @@ export function DocumentGrid({ documents }: DocumentGridProps) {
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{doc.title}</p>
-                <p className="text-xs text-neutral-500">{STATUS_LABELS[doc.status]}</p>
+                <p className="text-xs text-neutral-500">
+                  {STATUS_LABELS[doc.status]}
+                  {(doc.status === 'SENT' || doc.status === 'IN_PROGRESS') &&
+                    typeof doc.recipientCount === 'number' && (
+                      <>
+                        {' '}
+                        · {doc.signedCount ?? 0} of {doc.recipientCount} signed
+                      </>
+                    )}
+                </p>
               </div>
             </Link>
             {doc.status === 'DRAFT' && (
-              <Link href={`/documents/${doc.id}/edit`} className="text-xs underline">
-                Edit fields
-              </Link>
+              <div className="flex gap-2 text-xs">
+                <Link href={`/documents/${doc.id}/edit`} className="underline">
+                  Edit fields
+                </Link>
+                <Link href={`/documents/${doc.id}/send`} className="underline">
+                  Send
+                </Link>
+              </div>
             )}
           </div>
         ))}

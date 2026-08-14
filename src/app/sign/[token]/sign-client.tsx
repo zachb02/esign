@@ -103,25 +103,42 @@ export function SignClient({ token }: SignClientProps) {
     if (!response.ok) {
       const body = await response.json().catch(() => ({ error: 'Failed to save value' }));
       window.alert(body.error ?? 'Failed to save value');
+      // The TEXT input is uncontrolled and only resyncs to the server's
+      // value via its `key` prop. Without this, a rejected edit stays
+      // visible in the DOM even though the database still holds the old
+      // value, so it could get silently flattened into the final document.
+      // Reload so the input remounts showing the actual (unchanged) value.
+      loadSession();
       return;
     }
     loadSession();
   }
 
   async function saveChecked(fieldId: string, checked: boolean) {
-    await fetch(`/api/sign/${token}/fields/${fieldId}`, {
+    const response = await fetch(`/api/sign/${token}/fields/${fieldId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ checked }),
     });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Failed to save value' }));
+      window.alert(body.error ?? 'Failed to save value');
+    }
     loadSession();
   }
 
   async function saveSignature(fieldId: string, blob: Blob) {
     const formData = new FormData();
     formData.append('image', blob, 'signature.png');
-    await fetch(`/api/sign/${token}/fields/${fieldId}`, { method: 'PATCH', body: formData });
+    const response = await fetch(`/api/sign/${token}/fields/${fieldId}`, {
+      method: 'PATCH',
+      body: formData,
+    });
     setActiveSignatureFieldId(null);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Failed to save signature' }));
+      window.alert(body.error ?? 'Failed to save signature');
+    }
     loadSession();
   }
 

@@ -95,6 +95,20 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
     loadRoles();
   }
 
+  async function deleteRole(roleId: string) {
+    const response = await fetch(`/api/signer-roles/${roleId}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Failed to delete signer role' }));
+      window.alert(body.error ?? 'Failed to delete signer role');
+      return;
+    }
+    if (selectedRoleId === roleId) {
+      setSelectedRoleId(null);
+    }
+    loadRoles();
+    loadFields();
+  }
+
   async function createField(type: FieldTypeValue, page: number, x: number, y: number) {
     const response = await fetch('/api/fields', {
       method: 'POST',
@@ -155,6 +169,7 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
         selectedRoleId={selectedRoleId}
         onSelectRole={setSelectedRoleId}
         onAddRole={addRole}
+        onDeleteRole={deleteRole}
         onDragFieldType={(type, event) =>
           event.dataTransfer.setData('application/x-esign-field-type', type)
         }

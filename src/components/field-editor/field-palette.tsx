@@ -10,6 +10,7 @@ interface FieldPaletteProps {
   selectedRoleId: string | null;
   onSelectRole: (roleId: string) => void;
   onAddRole: () => void;
+  onDeleteRole: (roleId: string) => void;
   onDragFieldType: (type: FieldTypeValue, event: React.DragEvent) => void;
 }
 
@@ -18,6 +19,7 @@ export function FieldPalette({
   selectedRoleId,
   onSelectRole,
   onAddRole,
+  onDeleteRole,
   onDragFieldType,
 }: FieldPaletteProps) {
   return (
@@ -44,15 +46,27 @@ export function FieldPalette({
             <button
               key={role.id}
               onClick={() => onSelectRole(role.id)}
-              className={`flex items-center gap-2 rounded px-3 py-2 text-left text-sm ${
+              className={`group flex items-center justify-between gap-2 rounded px-3 py-2 text-left text-sm ${
                 selectedRoleId === role.id ? 'bg-neutral-100 font-medium' : 'hover:bg-neutral-50'
               }`}
             >
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  className="h-3 w-3 shrink-0 rounded-full"
+                  style={{ backgroundColor: ROLE_COLORS[role.colorIndex % ROLE_COLORS.length] }}
+                />
+                <span className="truncate">{role.name}</span>
+              </span>
               <span
-                className="h-3 w-3 shrink-0 rounded-full"
-                style={{ backgroundColor: ROLE_COLORS[role.colorIndex % ROLE_COLORS.length] }}
-              />
-              {role.name}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteRole(role.id);
+                }}
+                title="Delete signer role"
+                className="hidden shrink-0 text-neutral-400 hover:text-neutral-700 group-hover:inline"
+              >
+                ✕
+              </span>
             </button>
           ))}
           <button

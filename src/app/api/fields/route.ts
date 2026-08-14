@@ -3,6 +3,7 @@ import type { FieldType } from '@prisma/client';
 import { prisma } from '@/lib/db/prisma';
 import { clampFieldRect } from '@/lib/fields/clamp';
 import { DEFAULT_FIELD_SIZE } from '@/lib/fields/field-defaults';
+import { isDocumentEditable } from '@/lib/documents/lock';
 
 const VALID_TYPES: FieldType[] = ['SIGNATURE', 'INITIALS', 'DATE_SIGNED', 'TEXT', 'CHECKBOX'];
 
@@ -50,6 +51,9 @@ export async function POST(request: NextRequest) {
       : await prisma.document.findUnique({ where: { id: ownerId } });
   if (!owner) {
     return NextResponse.json({ error: `${ownerType} not found` }, { status: 404 });
+  }
+  if (ownerType === 'document' && !isDocumentEditable((owner as unknown as { status: string }).status)) {
+    return NextResponse.json({ error: 'This document can no longer be edited' }, { status: 400 });
   }
 
   const ownerWhere = ownerType === 'template' ? { templateId: ownerId } : { documentId: ownerId };

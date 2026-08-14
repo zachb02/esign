@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { pickReassignmentRole } from '@/lib/fields/role-reassignment';
+import { isDocumentEditable } from '@/lib/documents/lock';
 
 export async function DELETE(
   _request: NextRequest,
@@ -10,6 +11,12 @@ export async function DELETE(
   const existing = await prisma.signerRole.findUnique({ where: { id } });
   if (!existing) {
     return NextResponse.json({ error: 'Signer role not found' }, { status: 404 });
+  }
+  if (existing.documentId) {
+    const document = await prisma.document.findUnique({ where: { id: existing.documentId } });
+    if (document && !isDocumentEditable(document.status)) {
+      return NextResponse.json({ error: 'This document can no longer be edited' }, { status: 400 });
+    }
   }
 
   const siblingWhere = existing.templateId

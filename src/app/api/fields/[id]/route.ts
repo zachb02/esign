@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { clampFieldRect } from '@/lib/fields/clamp';
+import { isDocumentEditable } from '@/lib/documents/lock';
 
 export async function PATCH(
   request: NextRequest,
@@ -11,6 +12,12 @@ export async function PATCH(
   const existing = await prisma.field.findUnique({ where: { id } });
   if (!existing) {
     return NextResponse.json({ error: 'Field not found' }, { status: 404 });
+  }
+  if (existing.documentId) {
+    const document = await prisma.document.findUnique({ where: { id: existing.documentId } });
+    if (document && !isDocumentEditable(document.status)) {
+      return NextResponse.json({ error: 'This document can no longer be edited' }, { status: 400 });
+    }
   }
 
   const data: {
@@ -78,6 +85,12 @@ export async function DELETE(
   const existing = await prisma.field.findUnique({ where: { id } });
   if (!existing) {
     return NextResponse.json({ error: 'Field not found' }, { status: 404 });
+  }
+  if (existing.documentId) {
+    const document = await prisma.document.findUnique({ where: { id: existing.documentId } });
+    if (document && !isDocumentEditable(document.status)) {
+      return NextResponse.json({ error: 'This document can no longer be edited' }, { status: 400 });
+    }
   }
   await prisma.field.delete({ where: { id } });
   return NextResponse.json({ success: true });

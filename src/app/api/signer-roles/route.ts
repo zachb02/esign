@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
+import { isDocumentEditable } from '@/lib/documents/lock';
 
 export async function GET(request: NextRequest) {
   const ownerType = request.nextUrl.searchParams.get('ownerType');
@@ -37,6 +38,9 @@ export async function POST(request: NextRequest) {
       : await prisma.document.findUnique({ where: { id: ownerId } });
   if (!owner) {
     return NextResponse.json({ error: `${ownerType} not found` }, { status: 404 });
+  }
+  if (ownerType === 'document' && !isDocumentEditable((owner as unknown as { status: string }).status)) {
+    return NextResponse.json({ error: 'This document can no longer be edited' }, { status: 400 });
   }
 
   const ownerWhere = ownerType === 'template' ? { templateId: ownerId } : { documentId: ownerId };

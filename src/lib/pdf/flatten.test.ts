@@ -96,6 +96,63 @@ describe('flattenPdf', () => {
     expect(flattened.length).toBeGreaterThan(original.length);
   });
 
+  it('does not throw for a TEXT field with non-Latin characters, and still draws other fields', async () => {
+    // Constructs a FlattenFieldInput with a Cyrillic textValue directly,
+    // bypassing the route-level WinAnsi validation, to prove the per-field
+    // try/catch in flattenPdf is an independent defense: a field that would
+    // make pdf-lib's WinAnsi-encoded Helvetica font throw must be skipped,
+    // not allowed to abort the whole flatten call.
+    const original = await makeTestPdf(1);
+    const flattened = await flattenPdf(original, [
+      {
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+        textValue: 'Привет',
+        checked: null,
+        signaturePng: null,
+        dateValue: null,
+      },
+      {
+        type: 'CHECKBOX',
+        page: 1,
+        x: 0.4,
+        y: 0.4,
+        width: 0.03,
+        height: 0.03,
+        textValue: null,
+        checked: true,
+        signaturePng: null,
+        dateValue: null,
+      },
+    ]);
+    expect(flattened.subarray(0, 5).toString()).toBe('%PDF-');
+    const doc = await PDFDocument.load(flattened);
+    expect(doc.getPageCount()).toBe(1);
+  });
+
+  it('does not throw for a SIGNATURE field with non-PNG bytes under a signaturePng buffer', async () => {
+    const original = await makeTestPdf(1);
+    const flattened = await flattenPdf(original, [
+      {
+        type: 'SIGNATURE',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.25,
+        height: 0.06,
+        textValue: null,
+        checked: null,
+        signaturePng: Buffer.from('not a real png'),
+        dateValue: null,
+      },
+    ]);
+    expect(flattened.subarray(0, 5).toString()).toBe('%PDF-');
+  });
+
   it('skips a field pointing at a page beyond the document', async () => {
     const original = await makeTestPdf(1);
     await expect(

@@ -180,7 +180,11 @@ describe('PATCH /api/sign/:token/fields/:fieldId', () => {
     });
 
     const formData = new FormData();
-    formData.append('image', new File([Buffer.from([1, 2, 3, 4])], 'sig.png', { type: 'image/png' }));
+    const pngBytes = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from([1, 2, 3, 4]),
+    ]);
+    formData.append('image', new File([pngBytes], 'sig.png', { type: 'image/png' }));
     const request = new NextRequest(`http://localhost/api/sign/sig-token/fields/${field.id}`, {
       method: 'PATCH',
       body: formData,
@@ -204,6 +208,214 @@ describe('PATCH /api/sign/:token/fields/:fieldId', () => {
     });
     expect(response.status).toBe(404);
   });
+
+  it('rejects a TEXT value containing non-Latin characters (e.g. Cyrillic)', async () => {
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-nonlatin',
+        storageKey: 'h-nonlatin.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'nonlatin-token',
+      },
+    });
+
+    const request = new NextRequest(`http://localhost/api/sign/nonlatin-token/fields/${field.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textValue: 'Привет' }),
+    });
+    const response = await fieldValueRoute.PATCH(request, {
+      params: Promise.resolve({ token: 'nonlatin-token', fieldId: field.id }),
+    });
+    expect(response.status).toBe(400);
+    const value = await prisma.fieldValue.findUnique({ where: { fieldId: field.id } });
+    expect(value).toBeNull();
+  });
+
+  it('accepts a TEXT value with accented Latin characters', async () => {
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-accent',
+        storageKey: 'h-accent.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'accent-token',
+      },
+    });
+
+    const request = new NextRequest(`http://localhost/api/sign/accent-token/fields/${field.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textValue: 'José Núñez' }),
+    });
+    const response = await fieldValueRoute.PATCH(request, {
+      params: Promise.resolve({ token: 'accent-token', fieldId: field.id }),
+    });
+    expect(response.status).toBe(200);
+    const value = await prisma.fieldValue.findUnique({ where: { fieldId: field.id } });
+    expect(value?.textValue).toBe('José Núñez');
+  });
+
+  it('rejects a signature upload whose bytes are not a valid PNG', async () => {
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-badpng',
+        storageKey: 'h-badpng.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'SIGNATURE',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.25,
+        height: 0.06,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'badpng-token',
+      },
+    });
+
+    const formData = new FormData();
+    formData.append(
+      'image',
+      new File([Buffer.from('this is definitely not a png file')], 'sig.png', { type: 'image/png' })
+    );
+    const request = new NextRequest(`http://localhost/api/sign/badpng-token/fields/${field.id}`, {
+      method: 'PATCH',
+      body: formData,
+    });
+    const response = await fieldValueRoute.PATCH(request, {
+      params: Promise.resolve({ token: 'badpng-token', fieldId: field.id }),
+    });
+    expect(response.status).toBe(400);
+    const value = await prisma.fieldValue.findUnique({ where: { fieldId: field.id } });
+    expect(value).toBeNull();
+  });
+
+  it('rejects a signature upload that exceeds the 2MB size cap', async () => {
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-toobig',
+        storageKey: 'h-toobig.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'SIGNATURE',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.25,
+        height: 0.06,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'toobig-token',
+      },
+    });
+
+    const oversized = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.alloc(2 * 1024 * 1024 + 1, 0),
+    ]);
+    const formData = new FormData();
+    formData.append('image', new File([oversized], 'sig.png', { type: 'image/png' }));
+    const request = new NextRequest(`http://localhost/api/sign/toobig-token/fields/${field.id}`, {
+      method: 'PATCH',
+      body: formData,
+    });
+    const response = await fieldValueRoute.PATCH(request, {
+      params: Promise.resolve({ token: 'toobig-token', fieldId: field.id }),
+    });
+    expect(response.status).toBe(400);
+  });
+
 });
 
 describe('POST /api/sign/:token/complete', () => {

@@ -3,6 +3,18 @@ import { prisma } from '@/lib/db/prisma';
 import { getSignatureStorage } from '@/lib/storage';
 import { sha256Hex } from '@/lib/pdf/hash';
 
+// pdf-lib draws TEXT with the WinAnsi-encoded StandardFonts.Helvetica font,
+// which throws on any character outside Latin-1. Reject those up front so a
+// bad value can never reach flattenPdf and brick a document at completion.
+const NON_WINANSI_CHAR = /[^\x00-\xFF]/;
+
+const PNG_MAGIC_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const MAX_SIGNATURE_UPLOAD_BYTES = 2 * 1024 * 1024; // 2MB
+
+function isPngBuffer(buffer: Buffer): boolean {
+  return buffer.length >= PNG_MAGIC_BYTES.length && buffer.subarray(0, 8).equals(PNG_MAGIC_BYTES);
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ token: string; fieldId: string }> }
@@ -51,6 +63,12 @@ export async function PATCH(
       return NextResponse.json({ error: 'An image field is required' }, { status: 400 });
     }
     const buffer = Buffer.from(await file.arrayBuffer());
+    if (buffer.byteLength > MAX_SIGNATURE_UPLOAD_BYTES) {
+      return NextResponse.json({ error: 'Image file is too large' }, { status: 400 });
+    }
+    if (!isPngBuffer(buffer)) {
+      return NextResponse.json({ error: 'File is not a valid PNG image' }, { status: 400 });
+    }
     const key = `${sha256Hex(buffer)}.png`;
     await getSignatureStorage().save(key, buffer);
     data.signatureImageKey = key;
@@ -60,7 +78,14 @@ export async function PATCH(
       if (typeof body.textValue !== 'string' || !body.textValue.trim()) {
         return NextResponse.json({ error: 'textValue is required' }, { status: 400 });
       }
-      data.textValue = body.textValue.trim();
+      const trimmed = body.textValue.trim();
+      if (NON_WINANSI_CHAR.test(trimmed)) {
+        return NextResponse.json(
+          { error: 'Please use only standard Latin characters (accents are fine)' },
+          { status: 400 }
+        );
+      }
+      data.textValue = trimmed;
     } else if (field.type === 'CHECKBOX') {
       if (typeof body.checked !== 'boolean') {
         return NextResponse.json({ error: 'checked must be a boolean' }, { status: 400 });

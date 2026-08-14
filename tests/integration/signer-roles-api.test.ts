@@ -132,4 +132,50 @@ describe('signer-roles API', () => {
     const reloaded = await prisma.field.findUnique({ where: { id: field.id } });
     expect(reloaded?.signerRoleId).toBe(roleB.id);
   });
+
+  it('assigns a non-colliding order to a new role after a middle role is deleted', async () => {
+    const template = await createTemplate();
+    const { body: role1 } = await createRole(
+      new NextRequest('http://localhost/api/signer-roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerType: 'template', ownerId: template.id }),
+      })
+    );
+    const { body: role2 } = await createRole(
+      new NextRequest('http://localhost/api/signer-roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerType: 'template', ownerId: template.id }),
+      })
+    );
+    const { body: role3 } = await createRole(
+      new NextRequest('http://localhost/api/signer-roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerType: 'template', ownerId: template.id }),
+      })
+    );
+    expect([role1.order, role2.order, role3.order]).toEqual([0, 1, 2]);
+
+    const deleteRequest = new NextRequest(`http://localhost/api/signer-roles/${role2.id}`, {
+      method: 'DELETE',
+    });
+    const deleteResponse = await signerRoleRoute.DELETE(deleteRequest, {
+      params: Promise.resolve({ id: role2.id }),
+    });
+    expect(deleteResponse.status).toBe(200);
+
+    const { body: role4 } = await createRole(
+      new NextRequest('http://localhost/api/signer-roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerType: 'template', ownerId: template.id }),
+      })
+    );
+
+    expect(role4.order).toBe(3);
+    expect(role4.colorIndex).toBe(3);
+    expect(role4.order).not.toBe(role3.order);
+  });
 });

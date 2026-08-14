@@ -39,22 +39,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `${ownerType} not found` }, { status: 404 });
   }
 
-  const existingCount = await prisma.signerRole.count({
-    where: ownerType === 'template' ? { templateId: ownerId } : { documentId: ownerId },
+  const ownerWhere = ownerType === 'template' ? { templateId: ownerId } : { documentId: ownerId };
+
+  const maxOrderResult = await prisma.signerRole.aggregate({
+    where: ownerWhere,
+    _max: { order: true },
   });
+  const nextOrder = (maxOrderResult._max.order ?? -1) + 1;
 
   const name =
     typeof body.name === 'string' && body.name.trim()
       ? body.name.trim()
-      : `Signer ${existingCount + 1}`;
+      : `Signer ${nextOrder + 1}`;
 
   const role = await prisma.signerRole.create({
     data: {
       templateId: ownerType === 'template' ? ownerId : null,
       documentId: ownerType === 'document' ? ownerId : null,
       name,
-      order: existingCount,
-      colorIndex: existingCount,
+      order: nextOrder,
+      colorIndex: nextOrder,
     },
   });
 

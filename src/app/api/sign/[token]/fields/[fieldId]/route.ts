@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { getSignatureStorage } from '@/lib/storage';
 import { sha256Hex } from '@/lib/pdf/hash';
-import { isPngFlattenable, isTextFlattenable } from '@/lib/pdf/flattenable';
+import { isPngFlattenable, isTextFlattenable, isWellFormedPngStructure } from '@/lib/pdf/flattenable';
 
 const PNG_MAGIC_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MAX_SIGNATURE_UPLOAD_BYTES = 2 * 1024 * 1024; // 2MB
@@ -65,10 +65,21 @@ export async function PATCH(
     if (!isPngBuffer(buffer)) {
       return NextResponse.json({ error: 'File is not a valid PNG image' }, { status: 400 });
     }
-    // The magic-bytes check above is a cheap pre-filter; the real gate is
-    // whether pdf-lib can actually embed it, since a valid header with a
-    // corrupt body would otherwise pass here and only fail silently at
-    // flatten time (see src/lib/pdf/flattenable.ts).
+    // Structural check FIRST, before any decompression is attempted.
+    // pdf-lib's bundled PNG inflate can hang in an unrecoverable
+    // synchronous infinite loop on a truncated deflate stream — no
+    // try/catch or timeout can interrupt it once entered (see
+    // src/lib/pdf/flattenable.ts). Rejecting a structurally incomplete
+    // chunk stream here, before embedPng() ever runs, closes that DoS
+    // without needing to decompress anything.
+    if (!isWellFormedPngStructure(buffer)) {
+      return NextResponse.json({ error: 'File is not a valid PNG image' }, { status: 400 });
+    }
+    // The structural + magic-bytes checks above are cheap pre-filters; the
+    // real gate is whether pdf-lib can actually embed it, since a
+    // structurally well-formed PNG can still have a corrupt body (bad CRC,
+    // bad compression, invalid pixel data) that would otherwise pass here
+    // and only fail silently at flatten time (see src/lib/pdf/flattenable.ts).
     if (!(await isPngFlattenable(buffer))) {
       return NextResponse.json({ error: 'File is not a valid PNG image' }, { status: 400 });
     }

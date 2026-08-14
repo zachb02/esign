@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createCanvas } from '@napi-rs/canvas';
 import { prisma } from '@/lib/db/prisma';
 import * as sessionRoute from '@/app/api/sign/[token]/route';
 import * as fieldValueRoute from '@/app/api/sign/[token]/fields/[fieldId]/route';
@@ -10,6 +11,26 @@ import * as completeRoute from '@/app/api/sign/[token]/complete/route';
 import * as declineRoute from '@/app/api/sign/[token]/decline/route';
 import { getDocumentStorage } from '@/lib/storage';
 import { makeTestPdf } from '../fixtures/make-test-pdf';
+
+// A real, larger signature-shaped PNG (multiple chunks worth of pixel
+// data) — used by the truncation tests below, since REAL_1X1_PNG is too
+// small to meaningfully exercise "cut off partway through the IDAT
+// stream."
+function makeRealSignaturePng(): Buffer {
+  const canvas = createCanvas(300, 120);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 300, 120);
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(10, 90);
+  for (let x = 10; x < 290; x += 5) {
+    ctx.lineTo(x, 90 + Math.sin(x / 12) * 25);
+  }
+  ctx.stroke();
+  return canvas.toBuffer('image/png');
+}
 
 // A real, minimal 1x1 transparent PNG — used anywhere a test needs a
 // signature upload that must survive real pdf-lib validation (isPngFlattenable
@@ -549,6 +570,127 @@ describe('PATCH /api/sign/:token/fields/:fieldId', () => {
     expect(response.status).toBe(400);
     const value = await prisma.fieldValue.findUnique({ where: { fieldId: field.id } });
     expect(value).toBeNull();
+  });
+
+  it('rejects a truncated PNG upload FAST with a 400, instead of hanging', async () => {
+    // Regression test for a real DoS: pdf-lib 1.17.1's bundled PNG inflate
+    // (@pdf-lib/upng) enters an infinite synchronous loop when handed a
+    // truncated deflate stream, and no try/catch/await/timeout on the JS
+    // side can interrupt a synchronous loop once entered. The fix
+    // (isWellFormedPngStructure, checked before isPngFlattenable ever
+    // calls embedPng) must reject a truncated PNG's chunk structure before
+    // any decompression is attempted. If this regresses, this test will
+    // itself hang instead of failing cleanly — that in itself is the
+    // signal something is broken, which is why we also assert on wall
+    // time, not just status.
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-truncatedpng',
+        storageKey: 'h-truncatedpng.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'SIGNATURE',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.25,
+        height: 0.06,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'truncatedpng-token',
+      },
+    });
+
+    const realPng = makeRealSignaturePng();
+    const truncated = realPng.subarray(0, Math.floor(realPng.length * 0.5));
+    const formData = new FormData();
+    formData.append('image', new File([truncated], 'sig.png', { type: 'image/png' }));
+    const request = new NextRequest(`http://localhost/api/sign/truncatedpng-token/fields/${field.id}`, {
+      method: 'PATCH',
+      body: formData,
+    });
+
+    const start = Date.now();
+    const response = await fieldValueRoute.PATCH(request, {
+      params: Promise.resolve({ token: 'truncatedpng-token', fieldId: field.id }),
+    });
+    const elapsedMs = Date.now() - start;
+
+    expect(response.status).toBe(400);
+    expect(elapsedMs).toBeLessThan(1000); // structural check rejects synchronously; no decompression attempted
+    const body = await response.json();
+    expect(body.error).toMatch(/not a valid PNG/i);
+    const value = await prisma.fieldValue.findUnique({ where: { fieldId: field.id } });
+    expect(value).toBeNull();
+  });
+
+  it('accepts a genuinely complete, larger real PNG signature upload', async () => {
+    const document = await prisma.document.create({
+      data: {
+        title: 'D',
+        originalFilename: 'd.pdf',
+        fileHash: 'h-realbigpng',
+        storageKey: 'h-realbigpng.pdf',
+        pageCount: 1,
+        fileSizeBytes: 10,
+        status: 'SENT',
+      },
+    });
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'SIGNATURE',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.25,
+        height: 0.06,
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'realbigpng-token',
+      },
+    });
+
+    const formData = new FormData();
+    formData.append('image', new File([makeRealSignaturePng()], 'sig.png', { type: 'image/png' }));
+    const request = new NextRequest(`http://localhost/api/sign/realbigpng-token/fields/${field.id}`, {
+      method: 'PATCH',
+      body: formData,
+    });
+    const response = await fieldValueRoute.PATCH(request, {
+      params: Promise.resolve({ token: 'realbigpng-token', fieldId: field.id }),
+    });
+    expect(response.status).toBe(200);
+    const value = await prisma.fieldValue.findUnique({ where: { fieldId: field.id } });
+    expect(value?.signatureImageKey).toMatch(/\.png$/);
   });
 
   it('rejects a signature upload that exceeds the 2MB size cap', async () => {

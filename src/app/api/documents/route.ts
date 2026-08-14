@@ -12,8 +12,14 @@ export async function GET(request: NextRequest) {
   const documents = await prisma.document.findMany({
     where,
     orderBy: { updatedAt: 'desc' },
+    include: { recipients: { select: { status: true } } },
   });
-  return NextResponse.json(documents);
+  const withCounts = documents.map(({ recipients, ...rest }) => ({
+    ...rest,
+    recipientCount: recipients.length,
+    signedCount: recipients.filter((r) => r.status === 'SIGNED').length,
+  }));
+  return NextResponse.json(withCounts);
 }
 
 export async function POST(request: NextRequest) {

@@ -137,4 +137,37 @@ describe('documents API', () => {
     const bytes = Buffer.from(await fileResponse.arrayBuffer());
     expect(bytes.equals(completedBytes)).toBe(true);
   });
+
+  it('includes recipientCount and signedCount in the list response', async () => {
+    const { body: document } = await uploadPdf('progress-doc.pdf', 1);
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'A',
+        email: 'a@example.com',
+        signingToken: 'progress-token-a',
+        status: 'SIGNED',
+      },
+    });
+    await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'B',
+        email: 'b@example.com',
+        signingToken: 'progress-token-b',
+        status: 'PENDING',
+      },
+    });
+
+    const listRequest = new NextRequest('http://localhost/api/documents?folderId=root');
+    const list = await (await documentsRoute.GET(listRequest)).json();
+    const found = list.find((d: { id: string }) => d.id === document.id);
+    expect(found.recipientCount).toBe(2);
+    expect(found.signedCount).toBe(1);
+  });
 });

@@ -180,16 +180,25 @@ export async function POST(
         // sibling's decline landed between our re-check above and now, this
         // is a no-op and the document correctly stays DECLINED — the
         // recipient's own SIGNED status (already committed) is unaffected.
-        const completedCount = await prisma.$transaction(async (tx) => {
-          const result = await tx.document.updateMany({
-            where: { id: recipient.documentId, status: { notIn: ['DECLINED', 'COMPLETED'] } },
-            data: { status: 'COMPLETED', completedPdfKey: completedKey },
-          });
-          if (result.count > 0) {
-            await recordAuditEvent(tx, { documentId: recipient.documentId, type: 'COMPLETED' });
-          }
-          return result.count;
-        });
+        //
+        // Explicit timeout: this transaction can wait on the per-document
+        // audit lock if another request is mid-write; on timeout it throws
+        // into the catch below and the document falls back to IN_PROGRESS
+        // with no retry path — bounding the wait keeps that failure mode
+        // rare without making it silent.
+        const completedCount = await prisma.$transaction(
+          async (tx) => {
+            const result = await tx.document.updateMany({
+              where: { id: recipient.documentId, status: { notIn: ['DECLINED', 'COMPLETED'] } },
+              data: { status: 'COMPLETED', completedPdfKey: completedKey },
+            });
+            if (result.count > 0) {
+              await recordAuditEvent(tx, { documentId: recipient.documentId, type: 'COMPLETED' });
+            }
+            return result.count;
+          },
+          { timeout: 10000 }
+        );
         if (completedCount === 0) {
           console.log(
             `Document ${recipient.documentId} was already finalized by a concurrent request; skipping COMPLETED status write`

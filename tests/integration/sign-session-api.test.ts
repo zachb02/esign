@@ -1716,6 +1716,9 @@ describe('Document.status transition race guards', () => {
     // The guarded write no-op'd: the ORIGINAL completedPdfKey survives, not
     // whatever key the (wasted) flatten in this request would have produced.
     expect(reloadedDocument?.completedPdfKey).toBe('pre-existing-completed-key.pdf');
+    expect(
+      await prisma.auditEvent.count({ where: { documentId: document.id, type: 'COMPLETED' } })
+    ).toBe(0);
   });
 
   it('does not overwrite an already-COMPLETED document with IN_PROGRESS when the LAST pending recipient completes and flatten fails', async () => {

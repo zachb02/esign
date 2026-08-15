@@ -253,6 +253,25 @@ describe('PATCH /api/sign/:token/fields/:fieldId', () => {
     expect(value?.signatureImageKey).toMatch(/\.png$/);
   });
 
+  it('records FIELD_FILLED after a successful signature upload', async () => {
+    const { recipient, field } = await createSentDocumentWithRecipient();
+    const formData = new FormData();
+    formData.append('image', new File([REAL_1X1_PNG], 'sig.png', { type: 'image/png' }));
+    const request = new NextRequest(
+      `http://localhost/api/sign/${recipient.signingToken}/fields/${field.id}`,
+      { method: 'PATCH', body: formData }
+    );
+    const response = await fieldValueRoute.PATCH(request, {
+      params: Promise.resolve({ token: recipient.signingToken, fieldId: field.id }),
+    });
+    expect(response.status).toBe(200);
+
+    const event = await prisma.auditEvent.findFirst({
+      where: { documentId: recipient.documentId, recipientId: recipient.id, type: 'FIELD_FILLED' },
+    });
+    expect(event).not.toBeNull();
+  });
+
   it('rejects a field-value update for an unknown token', async () => {
     const request = new NextRequest('http://localhost/api/sign/nope/fields/whatever', {
       method: 'PATCH',

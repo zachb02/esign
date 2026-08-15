@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db/prisma';
 import { getSignatureStorage } from '@/lib/storage';
 import { sha256Hex } from '@/lib/pdf/hash';
 import { isPngFlattenable, isTextFlattenable, isWellFormedPngStructure } from '@/lib/pdf/flattenable';
+import { recordAuditEvent } from '@/lib/audit/record';
+import { getRequestIp, getRequestUserAgent } from '@/lib/audit/request-metadata';
 
 const PNG_MAGIC_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MAX_SIGNATURE_UPLOAD_BYTES = 2 * 1024 * 1024; // 2MB
@@ -16,6 +18,8 @@ export async function PATCH(
   { params }: { params: Promise<{ token: string; fieldId: string }> }
 ) {
   const { token, fieldId } = await params;
+  const ipAddress = getRequestIp(request);
+  const userAgent = getRequestUserAgent(request);
 
   const recipient = await prisma.recipient.findUnique({ where: { signingToken: token } });
   if (!recipient) {
@@ -106,7 +110,17 @@ export async function PATCH(
         // Empty/whitespace-only value means "clear this field" rather than a
         // validation error — remove any existing FieldValue row so
         // required-field checks at complete-time correctly see it as unfilled.
-        await prisma.fieldValue.deleteMany({ where: { fieldId: field.id } });
+        await prisma.$transaction(async (tx) => {
+          await tx.fieldValue.deleteMany({ where: { fieldId: field.id } });
+          await recordAuditEvent(tx, {
+            documentId: recipient.documentId,
+            recipientId: recipient.id,
+            type: 'FIELD_FILLED',
+            detail: `${field.label ?? field.type} (cleared)`,
+            ipAddress,
+            userAgent,
+          });
+        });
         return NextResponse.json({ fieldId: field.id, cleared: true });
       }
       data.textValue = trimmed;
@@ -123,10 +137,21 @@ export async function PATCH(
     }
   }
 
-  const value = await prisma.fieldValue.upsert({
-    where: { fieldId: field.id },
-    create: { fieldId: field.id, recipientId: recipient.id, ...data },
-    update: data,
+  const value = await prisma.$transaction(async (tx) => {
+    const created = await tx.fieldValue.upsert({
+      where: { fieldId: field.id },
+      create: { fieldId: field.id, recipientId: recipient.id, ...data },
+      update: data,
+    });
+    await recordAuditEvent(tx, {
+      documentId: recipient.documentId,
+      recipientId: recipient.id,
+      type: 'FIELD_FILLED',
+      detail: field.label ?? field.type,
+      ipAddress,
+      userAgent,
+    });
+    return created;
   });
 
   return NextResponse.json(value);

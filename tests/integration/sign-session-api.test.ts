@@ -48,6 +48,7 @@ beforeAll(() => {
 });
 
 beforeEach(async () => {
+  await prisma.auditEvent.deleteMany();
   await prisma.fieldValue.deleteMany();
   await prisma.recipient.deleteMany();
   await prisma.field.deleteMany();
@@ -58,6 +59,7 @@ beforeEach(async () => {
 afterAll(async () => {
   rmSync(dataDir, { recursive: true, force: true });
   delete process.env.ESIGN_DATA_DIR;
+  await prisma.auditEvent.deleteMany();
   await prisma.fieldValue.deleteMany();
   await prisma.recipient.deleteMany();
   await prisma.field.deleteMany();
@@ -128,6 +130,19 @@ describe('GET /api/sign/:token', () => {
       params: Promise.resolve({ token: 'does-not-exist' }),
     });
     expect(response.status).toBe(404);
+  });
+
+  it('records VIEWED exactly once across repeated GETs to the same signing link', async () => {
+    const { recipient } = await createSentDocumentWithRecipient();
+    const request1 = new NextRequest(`http://localhost/api/sign/${recipient.signingToken}`);
+    await sessionRoute.GET(request1, { params: Promise.resolve({ token: recipient.signingToken }) });
+    const request2 = new NextRequest(`http://localhost/api/sign/${recipient.signingToken}`);
+    await sessionRoute.GET(request2, { params: Promise.resolve({ token: recipient.signingToken }) });
+
+    const viewedEvents = await prisma.auditEvent.findMany({
+      where: { documentId: recipient.documentId, recipientId: recipient.id, type: 'VIEWED' },
+    });
+    expect(viewedEvents).toHaveLength(1);
   });
 });
 

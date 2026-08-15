@@ -121,6 +121,13 @@ export function DocumentGrid({ documents }: DocumentGridProps) {
                 </Link>
               </div>
             )}
+            {doc.status !== 'DRAFT' && (
+              <div className="flex gap-2 text-xs">
+                <Link href={`/documents/${doc.id}/manage`} className="underline">
+                  Manage
+                </Link>
+              </div>
+            )}
           </div>
         ))}
       </div>

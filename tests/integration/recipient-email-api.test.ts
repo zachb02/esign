@@ -27,7 +27,7 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-async function createSentDocumentWithRecipient() {
+async function createSentDocumentWithRecipient(signingToken = 'tok-email-test') {
   const document = await prisma.document.create({
     data: {
       title: 'D',
@@ -48,7 +48,7 @@ async function createSentDocumentWithRecipient() {
       signerRoleId: role.id,
       name: 'Jane Doe',
       email: 'jane@example.com',
-      signingToken: 'tok-email-test',
+      signingToken,
     },
   });
   return { document, recipient };
@@ -107,8 +107,9 @@ describe('POST /api/documents/:id/recipients/:recipientId/email', () => {
   it('returns 404 for a recipient that does not belong to the given document', async () => {
     vi.mocked(isEmailConfigured).mockReturnValue(true);
     const { recipient } = await createSentDocumentWithRecipient();
-    const response = await emailRoute.POST(emailRequest('wrong-doc-id', recipient.id), {
-      params: Promise.resolve({ id: 'wrong-doc-id', recipientId: recipient.id }),
+    const { document: otherDocument } = await createSentDocumentWithRecipient('tok-email-test-other');
+    const response = await emailRoute.POST(emailRequest(otherDocument.id, recipient.id), {
+      params: Promise.resolve({ id: otherDocument.id, recipientId: recipient.id }),
     });
     expect(response.status).toBe(404);
   });

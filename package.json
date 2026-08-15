@@ -12,26 +12,28 @@
     "db:generate": "prisma generate"
   },
   "dependencies": {
-    "next": "15.1.6",
-    "react": "19.0.0",
-    "react-dom": "19.0.0",
+    "@napi-rs/canvas": "0.1.55",
     "@prisma/client": "6.2.1",
+    "next": "15.1.6",
+    "nodemailer": "^9.0.5",
     "pdfjs-dist": "4.9.155",
-    "@napi-rs/canvas": "0.1.55"
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
   },
   "devDependencies": {
-    "typescript": "5.7.3",
     "@types/node": "22.10.10",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "19.0.7",
     "@types/react-dom": "19.0.3",
-    "prisma": "6.2.1",
-    "vitest": "2.1.8",
-    "dotenv": "16.4.7",
-    "pdf-lib": "1.17.1",
-    "tailwindcss": "3.4.17",
-    "postcss": "8.5.1",
     "autoprefixer": "10.4.20",
+    "dotenv": "16.4.7",
     "eslint": "9.18.0",
-    "eslint-config-next": "15.1.6"
+    "eslint-config-next": "15.1.6",
+    "pdf-lib": "1.17.1",
+    "postcss": "8.5.1",
+    "prisma": "6.2.1",
+    "tailwindcss": "3.4.17",
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
   }
 }

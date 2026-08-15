@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createCanvas } from '@napi-rs/canvas';
+import { PDFDocument } from 'pdf-lib';
 import { prisma } from '@/lib/db/prisma';
 import * as sessionRoute from '@/app/api/sign/[token]/route';
 import * as fieldValueRoute from '@/app/api/sign/[token]/fields/[fieldId]/route';
@@ -1333,6 +1334,75 @@ describe('POST /api/sign/:token/complete', () => {
 
     const flattenedBytes = await getDocumentStorage().read(reloadedDocument!.completedPdfKey!);
     expect(flattenedBytes.subarray(0, 5).toString()).toBe('%PDF-');
+  });
+
+  it('records SIGNED and COMPLETED events, and appends a Certificate of Completion page, when the last recipient completes', async () => {
+    const pdfBytes = await makeTestPdf(1);
+    const document = await prisma.document.create({
+      data: {
+        title: 'Audit Trail Doc',
+        originalFilename: 'd.pdf',
+        fileHash: 'audit-h1',
+        storageKey: 'audit-h1.pdf',
+        pageCount: 1,
+        fileSizeBytes: pdfBytes.byteLength,
+        status: 'SENT',
+      },
+    });
+    await getDocumentStorage().save('audit-h1.pdf', pdfBytes);
+    const role = await prisma.signerRole.create({
+      data: { documentId: document.id, name: 'Signer 1', order: 0, colorIndex: 0 },
+    });
+    const field = await prisma.field.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        type: 'TEXT',
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.04,
+        required: true,
+      },
+    });
+    const recipient = await prisma.recipient.create({
+      data: {
+        documentId: document.id,
+        signerRoleId: role.id,
+        name: 'Jane',
+        email: 'jane@example.com',
+        signingToken: 'audit-complete-token',
+      },
+    });
+    await prisma.fieldValue.create({
+      data: { fieldId: field.id, recipientId: recipient.id, textValue: 'Jane' },
+    });
+
+    const request = new NextRequest('http://localhost/api/sign/audit-complete-token/complete', {
+      method: 'POST',
+      headers: { 'x-forwarded-for': '203.0.113.5', 'user-agent': 'vitest' },
+    });
+    const response = await completeRoute.POST(request, {
+      params: Promise.resolve({ token: 'audit-complete-token' }),
+    });
+    expect(response.status).toBe(200);
+
+    const signedEvent = await prisma.auditEvent.findFirst({
+      where: { documentId: document.id, recipientId: recipient.id, type: 'SIGNED' },
+    });
+    expect(signedEvent?.ipAddress).toBe('203.0.113.5');
+
+    const completedEvent = await prisma.auditEvent.findFirst({
+      where: { documentId: document.id, recipientId: null, type: 'COMPLETED' },
+    });
+    expect(completedEvent).not.toBeNull();
+
+    const reloaded = await prisma.document.findUniqueOrThrow({ where: { id: document.id } });
+    expect(reloaded.completedPdfKey).not.toBeNull();
+    const completedBytes = await getDocumentStorage().read(reloaded.completedPdfKey!);
+    const completedPdf = await PDFDocument.load(completedBytes);
+    expect(completedPdf.getPageCount()).toBe(2);
   });
 });
 

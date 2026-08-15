@@ -2,13 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { getDocumentStorage, getSignatureStorage } from '@/lib/storage';
 import { sha256Hex } from '@/lib/pdf/hash';
-import { flattenPdf, type FlattenFieldInput } from '@/lib/pdf/flatten';
+import {
+  flattenPdf,
+  appendCertificate,
+  type FlattenFieldInput,
+  type CertificateRecipientInput,
+} from '@/lib/pdf/flatten';
+import { recordAuditEvent } from '@/lib/audit/record';
+import { verifyAuditChain } from '@/lib/audit/verify';
+import { getRequestIp, getRequestUserAgent } from '@/lib/audit/request-metadata';
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params;
+  const ipAddress = getRequestIp(request);
+  const userAgent = getRequestUserAgent(request);
 
   const recipient = await prisma.recipient.findUnique({ where: { signingToken: token } });
   if (!recipient) {
@@ -64,6 +74,13 @@ export async function POST(
       where: { id: recipient.id },
       data: { status: 'SIGNED', signedAt: now },
     });
+    await recordAuditEvent(tx, {
+      documentId: recipient.documentId,
+      recipientId: recipient.id,
+      type: 'SIGNED',
+      ipAddress,
+      userAgent,
+    });
   });
 
   const remainingPending = await prisma.recipient.count({
@@ -94,13 +111,6 @@ export async function POST(
         for (const field of allFields) {
           let signaturePng: Buffer | null = null;
           if (field.value?.signatureImageKey) {
-            // Same graceful-degradation semantics as flattenPdf's internal
-            // per-field try/catch: a missing/corrupt signature file must
-            // never abort the whole flatten attempt (which would leave the
-            // document permanently stuck — every recipient is already
-            // SIGNED by this point, and `complete` rejects non-PENDING
-            // recipients, so there'd be no way to retry). Log and simply
-            // omit this one field instead.
             try {
               signaturePng = await getSignatureStorage().read(field.value.signatureImageKey);
             } catch (error) {
@@ -126,19 +136,61 @@ export async function POST(
 
         const originalBytes = await getDocumentStorage().read(document.storageKey);
         const flattenedBytes = await flattenPdf(originalBytes, flattenInputs);
-        const completedKey = `${sha256Hex(flattenedBytes)}-completed.pdf`;
-        await getDocumentStorage().save(completedKey, flattenedBytes);
+
+        // Append a Certificate of Completion page summarizing every
+        // recipient's signing event and the audit chain's integrity, before
+        // this document is ever marked COMPLETED. verifyAuditChain() here
+        // necessarily reflects the state just before this document's own
+        // COMPLETED event is recorded below — that event can't describe
+        // itself.
+        const allRecipients = await prisma.recipient.findMany({
+          where: { documentId: recipient.documentId },
+          include: { signerRole: true },
+        });
+        const signingEvents = await prisma.auditEvent.findMany({
+          where: { documentId: recipient.documentId, type: { in: ['SIGNED', 'DECLINED'] } },
+        });
+        const ipByRecipientId = new Map(
+          signingEvents.map((event) => [event.recipientId, event.ipAddress])
+        );
+        const certificateRecipients: CertificateRecipientInput[] = allRecipients.map((r) => ({
+          name: r.name,
+          email: r.email,
+          roleName: r.signerRole.name,
+          status: r.status,
+          signedAt: r.signedAt,
+          declinedAt: r.declinedAt,
+          ipAddress: ipByRecipientId.get(r.id) ?? null,
+        }));
+        const chain = await verifyAuditChain(recipient.documentId);
+        const chainSummary = chain.verified
+          ? 'verified, no tampering detected'
+          : `WARNING - integrity check failed at event ${chain.brokenAtIndex}`;
+
+        const certifiedBytes = await appendCertificate(flattenedBytes, {
+          recipients: certificateRecipients,
+          chainSummary,
+        });
+
+        const completedKey = `${sha256Hex(certifiedBytes)}-completed.pdf`;
+        await getDocumentStorage().save(completedKey, certifiedBytes);
 
         // Only move the document into COMPLETED if it hasn't already been
         // finalized (declined or completed) by a concurrent request. If a
         // sibling's decline landed between our re-check above and now, this
         // is a no-op and the document correctly stays DECLINED — the
         // recipient's own SIGNED status (already committed) is unaffected.
-        const { count } = await prisma.document.updateMany({
-          where: { id: recipient.documentId, status: { notIn: ['DECLINED', 'COMPLETED'] } },
-          data: { status: 'COMPLETED', completedPdfKey: completedKey },
+        const completedCount = await prisma.$transaction(async (tx) => {
+          const result = await tx.document.updateMany({
+            where: { id: recipient.documentId, status: { notIn: ['DECLINED', 'COMPLETED'] } },
+            data: { status: 'COMPLETED', completedPdfKey: completedKey },
+          });
+          if (result.count > 0) {
+            await recordAuditEvent(tx, { documentId: recipient.documentId, type: 'COMPLETED' });
+          }
+          return result.count;
         });
-        if (count === 0) {
+        if (completedCount === 0) {
           console.log(
             `Document ${recipient.documentId} was already finalized by a concurrent request; skipping COMPLETED status write`
           );

@@ -3,6 +3,7 @@ import { PDFDocument } from 'pdf-lib';
 import { createCanvas } from '@napi-rs/canvas';
 import { flattenPdf } from './flatten';
 import { makeTestPdf } from '../../../tests/fixtures/make-test-pdf';
+import { appendCertificate } from './flatten';
 
 function makeTestSignaturePng(): Buffer {
   const canvas = createCanvas(100, 40);
@@ -171,5 +172,81 @@ describe('flattenPdf', () => {
         },
       ])
     ).resolves.toBeInstanceOf(Buffer);
+  });
+});
+
+describe('appendCertificate', () => {
+  it('appends exactly one page listing each recipient', async () => {
+    const original = await makeTestPdf(1);
+    const result = await appendCertificate(original, {
+      recipients: [
+        {
+          name: 'Jane Doe',
+          email: 'jane@example.com',
+          roleName: 'Signer 1',
+          status: 'SIGNED',
+          signedAt: new Date('2026-01-01T00:00:00Z'),
+          declinedAt: null,
+          ipAddress: '127.0.0.1',
+        },
+      ],
+      chainSummary: 'verified, no tampering detected',
+    });
+    const loaded = await PDFDocument.load(result);
+    expect(loaded.getPageCount()).toBe(2);
+  });
+
+  it('falls back to a redacted line instead of throwing when a recipient name is not flattenable', async () => {
+    // Recipient name/email is free text collected at Send time with no
+    // WinAnsi validation (unlike field values). This proves one bad
+    // recipient can't abort the whole certificate page, which would abort
+    // the whole completion transaction and permanently strand an
+    // already-fully-signed document.
+    const original = await makeTestPdf(1);
+    const result = await appendCertificate(original, {
+      recipients: [
+        {
+          name: '太郎',
+          email: 'taro@example.com',
+          roleName: 'Signer 1',
+          status: 'SIGNED',
+          signedAt: new Date('2026-01-01T00:00:00Z'),
+          declinedAt: null,
+          ipAddress: null,
+        },
+      ],
+      chainSummary: 'verified, no tampering detected',
+    });
+    const loaded = await PDFDocument.load(result);
+    expect(loaded.getPageCount()).toBe(2);
+  });
+
+  it('lists multiple recipients on the same certificate page', async () => {
+    const original = await makeTestPdf(2);
+    const result = await appendCertificate(original, {
+      recipients: [
+        {
+          name: 'A',
+          email: 'a@example.com',
+          roleName: 'Signer 1',
+          status: 'SIGNED',
+          signedAt: new Date(),
+          declinedAt: null,
+          ipAddress: '10.0.0.1',
+        },
+        {
+          name: 'B',
+          email: 'b@example.com',
+          roleName: 'Signer 2',
+          status: 'DECLINED',
+          signedAt: null,
+          declinedAt: new Date(),
+          ipAddress: '10.0.0.2',
+        },
+      ],
+      chainSummary: 'verified, no tampering detected',
+    });
+    const loaded = await PDFDocument.load(result);
+    expect(loaded.getPageCount()).toBe(3);
   });
 });

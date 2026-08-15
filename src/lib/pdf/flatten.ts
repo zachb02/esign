@@ -83,3 +83,101 @@ export async function flattenPdf(
   const bytes = await pdfDoc.save();
   return Buffer.from(bytes);
 }
+
+export interface CertificateRecipientInput {
+  name: string;
+  email: string;
+  roleName: string;
+  status: string;
+  signedAt: Date | null;
+  declinedAt: Date | null;
+  ipAddress: string | null;
+}
+
+export interface AppendCertificateInput {
+  recipients: CertificateRecipientInput[];
+  chainSummary: string;
+}
+
+export async function appendCertificate(
+  pdfBuffer: Buffer,
+  input: AppendCertificateInput
+): Promise<Buffer> {
+  const pdfDoc = await PDFDocument.load(pdfBuffer);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const page = pdfDoc.addPage([612, 792]); // US Letter
+  const left = 54;
+  let y = 740;
+
+  page.drawText('Certificate of Completion', {
+    x: left,
+    y,
+    size: 18,
+    font: boldFont,
+    color: rgb(0, 0, 0),
+  });
+  y -= 30;
+
+  for (const recipient of input.recipients) {
+    // Recipient name/email is free text collected at Send time with no
+    // WinAnsi-encoding validation (unlike field values, which ARE
+    // validated - see isTextFlattenable). One recipient with an
+    // unsupported character must never abort the whole certificate page,
+    // which would abort the whole completion transaction and permanently
+    // strand an already-fully-signed document - the same bricking failure
+    // mode Phase 3 fixed for field values.
+    try {
+      const eventLabel =
+        recipient.status === 'SIGNED'
+          ? 'Signed'
+          : recipient.status === 'DECLINED'
+            ? 'Declined'
+            : 'Pending';
+      const eventDate = recipient.signedAt ?? recipient.declinedAt;
+
+      page.drawText(`${recipient.name} <${recipient.email}> - ${recipient.roleName}`, {
+        x: left,
+        y,
+        size: 11,
+        font: boldFont,
+        color: rgb(0, 0, 0),
+      });
+      y -= 16;
+
+      const detailParts = [eventLabel];
+      if (eventDate) detailParts.push(eventDate.toISOString());
+      if (recipient.ipAddress) detailParts.push(`IP ${recipient.ipAddress}`);
+      page.drawText(detailParts.join(' | '), {
+        x: left,
+        y,
+        size: 9,
+        font,
+        color: rgb(0.3, 0.3, 0.3),
+      });
+      y -= 24;
+    } catch (error) {
+      console.error('appendCertificate: failed to draw a recipient row, using fallback', error);
+      page.drawText('[Recipient details omitted - unsupported characters]', {
+        x: left,
+        y,
+        size: 9,
+        font,
+        color: rgb(0.3, 0.3, 0.3),
+      });
+      y -= 24;
+    }
+  }
+
+  y -= 10;
+  page.drawText(`Audit trail: ${input.chainSummary}`, {
+    x: left,
+    y,
+    size: 9,
+    font,
+    color: rgb(0.3, 0.3, 0.3),
+  });
+
+  const bytes = await pdfDoc.save();
+  return Buffer.from(bytes);
+}

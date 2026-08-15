@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { generateSigningToken } from '@/lib/recipients/token';
+import { recordAuditEvent } from '@/lib/audit/record';
 
 interface Assignment {
   signerRoleId: string;
@@ -67,6 +68,7 @@ export async function POST(
       created.push(recipient);
     }
     await tx.document.update({ where: { id: document.id }, data: { status: 'SENT' } });
+    await recordAuditEvent(tx, { documentId: document.id, type: 'SENT' });
     return created;
   });
 

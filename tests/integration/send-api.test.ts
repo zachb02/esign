@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db/prisma';
 import * as sendRoute from '@/app/api/documents/[id]/send/route';
 
 beforeEach(async () => {
+  await prisma.auditEvent.deleteMany();
   await prisma.recipient.deleteMany();
   await prisma.fieldValue.deleteMany();
   await prisma.field.deleteMany();
@@ -12,6 +13,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  await prisma.auditEvent.deleteMany();
   await prisma.recipient.deleteMany();
   await prisma.fieldValue.deleteMany();
   await prisma.field.deleteMany();
@@ -107,5 +109,19 @@ describe('send API', () => {
     ]);
     const response = await sendRoute.POST(request, { params: Promise.resolve({ id: document.id }) });
     expect(response.status).toBe(400);
+  });
+
+  it('records a SENT audit event with no recipientId', async () => {
+    const { document, role } = await createDraftDocumentWithOneField();
+    const request = sendRequest(document.id, [
+      { signerRoleId: role.id, name: 'Jane Doe', email: 'jane@example.com' },
+    ]);
+    await sendRoute.POST(request, { params: Promise.resolve({ id: document.id }) });
+
+    const event = await prisma.auditEvent.findFirst({
+      where: { documentId: document.id, type: 'SENT' },
+    });
+    expect(event).not.toBeNull();
+    expect(event?.recipientId).toBeNull();
   });
 });

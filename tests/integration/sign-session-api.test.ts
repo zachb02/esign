@@ -1486,6 +1486,24 @@ describe('POST /api/sign/:token/decline', () => {
     });
     expect(response.status).toBe(400);
   });
+
+  it('records DECLINED with the decline reason as detail', async () => {
+    const { recipient } = await createSentDocumentWithRecipient();
+    const request = new NextRequest(`http://localhost/api/sign/${recipient.signingToken}/decline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: 'Terms changed' }),
+    });
+    const response = await declineRoute.POST(request, {
+      params: Promise.resolve({ token: recipient.signingToken }),
+    });
+    expect(response.status).toBe(200);
+
+    const event = await prisma.auditEvent.findFirst({
+      where: { documentId: recipient.documentId, recipientId: recipient.id, type: 'DECLINED' },
+    });
+    expect(event?.detail).toBe('Terms changed');
+  });
 });
 
 describe('Document.status transition race guards', () => {

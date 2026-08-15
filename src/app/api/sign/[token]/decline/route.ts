@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
+import { recordAuditEvent } from '@/lib/audit/record';
+import { getRequestIp, getRequestUserAgent } from '@/lib/audit/request-metadata';
 
 export async function POST(
   request: NextRequest,
@@ -7,6 +9,8 @@ export async function POST(
 ) {
   const { token } = await params;
   const body = await request.json().catch(() => ({}));
+  const ipAddress = getRequestIp(request);
+  const userAgent = getRequestUserAgent(request);
 
   const recipient = await prisma.recipient.findUnique({ where: { signingToken: token } });
   if (!recipient) {
@@ -34,16 +38,30 @@ export async function POST(
   // this recipient. The shared Document.status write is guarded so a
   // concurrent complete() that already finalized the document (COMPLETED, or
   // a race where another recipient already declined) can't be clobbered.
-  const [, { count }] = await prisma.$transaction([
-    prisma.recipient.update({
+  //
+  // Acquire the Document row lock (updateMany) before the audit advisory lock
+  // (recordAuditEvent) — never the reverse — to avoid a deadlock against
+  // complete/route.ts's COMPLETED-event transaction, which takes the same two
+  // locks in this order.
+  const count = await prisma.$transaction(async (tx) => {
+    await tx.recipient.update({
       where: { id: recipient.id },
       data: { status: 'DECLINED', declinedAt: now, declineReason: reason },
-    }),
-    prisma.document.updateMany({
+    });
+    const result = await tx.document.updateMany({
       where: { id: recipient.documentId, status: { notIn: ['DECLINED', 'COMPLETED'] } },
       data: { status: 'DECLINED' },
-    }),
-  ]);
+    });
+    await recordAuditEvent(tx, {
+      documentId: recipient.documentId,
+      recipientId: recipient.id,
+      type: 'DECLINED',
+      detail: reason,
+      ipAddress,
+      userAgent,
+    });
+    return result.count;
+  });
   if (count === 0) {
     console.log(
       `Document ${recipient.documentId} was already finalized by a concurrent request; skipping DECLINED status write`

@@ -44,6 +44,7 @@ model Document {
   signerRoles      SignerRole[]
   fields           Field[]
   recipients       Recipient[]
+  auditEvents      AuditEvent[]
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 }
@@ -112,6 +113,16 @@ enum RecipientStatus {
   DECLINED
 }
 
+enum AuditEventType {
+  SENT
+  VIEWED
+  FIELD_FILLED
+  SIGNED
+  DECLINED
+  COMPLETED
+  EMAIL_SENT
+}
+
 model Recipient {
   id            String          @id @default(cuid())
   documentId    String
@@ -126,6 +137,7 @@ model Recipient {
   declinedAt    DateTime?
   declineReason String?
   fieldValues   FieldValue[]
+  auditEvents   AuditEvent[]
   createdAt     DateTime        @default(now())
 }
 
@@ -140,4 +152,21 @@ model FieldValue {
   signatureImageKey String?
   dateValue         DateTime?
   filledAt          DateTime  @default(now())
+}
+
+model AuditEvent {
+  id          String         @id @default(cuid())
+  documentId  String
+  document    Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  recipientId String?
+  recipient   Recipient?     @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+  type        AuditEventType
+  detail      String?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime       @default(now())
+  contentHash String
+  prevHash    String?
+
+  @@index([documentId, createdAt])
 }

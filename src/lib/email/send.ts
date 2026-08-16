@@ -22,6 +22,15 @@ export function isEmailConfigured(): boolean {
   return getSmtpEnv() !== null;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export function buildSigningLinkMailOptions(
   recipientEmail: string,
   recipientName: string,
@@ -29,12 +38,14 @@ export function buildSigningLinkMailOptions(
   signingLink: string,
   from: string
 ): SendMailOptions {
+  const safeName = escapeHtml(recipientName);
+  const safeTitle = escapeHtml(documentTitle);
   return {
     from,
     to: recipientEmail,
     subject: `Please sign: ${documentTitle}`,
     text: `Hi ${recipientName},\n\nPlease review and sign "${documentTitle}" using the link below:\n${signingLink}\n`,
-    html: `<p>Hi ${recipientName},</p><p>Please review and sign "${documentTitle}" using the link below:</p><p><a href="${signingLink}">${signingLink}</a></p>`,
+    html: `<p>Hi ${safeName},</p><p>Please review and sign "${safeTitle}" using the link below:</p><p><a href="${signingLink}">${signingLink}</a></p>`,
   };
 }
 

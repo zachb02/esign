@@ -111,6 +111,45 @@ describe('send API', () => {
     expect(response.status).toBe(400);
   });
 
+  it('rejects a recipient email containing CR/LF (SMTP envelope-injection guard)', async () => {
+    // Regression test: nodemailer parses "victim@example.com\r\nBcc: evil@x.com"
+    // as an address group and silently redirects the whole email to the
+    // attacker's address instead of the intended recipient — proven against
+    // the actual installed nodemailer during adversarial review. This must
+    // be rejected at Send time, before it ever reaches sendMail.
+    const { document, role } = await createDraftDocumentWithOneField();
+    const request = sendRequest(document.id, [
+      {
+        signerRoleId: role.id,
+        name: 'Jane Doe',
+        email: 'victim@example.com\r\nBcc: attacker@evil.com',
+      },
+    ]);
+    const response = await sendRoute.POST(request, { params: Promise.resolve({ id: document.id }) });
+    expect(response.status).toBe(400);
+    expect(await prisma.recipient.count()).toBe(0);
+  });
+
+  it('rejects a malformed recipient email', async () => {
+    const { document, role } = await createDraftDocumentWithOneField();
+    const request = sendRequest(document.id, [
+      { signerRoleId: role.id, name: 'Jane Doe', email: 'not-an-email' },
+    ]);
+    const response = await sendRoute.POST(request, { params: Promise.resolve({ id: document.id }) });
+    expect(response.status).toBe(400);
+    expect(await prisma.recipient.count()).toBe(0);
+  });
+
+  it('rejects a recipient name containing CR/LF', async () => {
+    const { document, role } = await createDraftDocumentWithOneField();
+    const request = sendRequest(document.id, [
+      { signerRoleId: role.id, name: 'Jane\r\nDoe', email: 'jane@example.com' },
+    ]);
+    const response = await sendRoute.POST(request, { params: Promise.resolve({ id: document.id }) });
+    expect(response.status).toBe(400);
+    expect(await prisma.recipient.count()).toBe(0);
+  });
+
   it('records a SENT audit event with no recipientId', async () => {
     const { document, role } = await createDraftDocumentWithOneField();
     const request = sendRequest(document.id, [

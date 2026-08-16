@@ -9,6 +9,18 @@ interface Assignment {
   email: string;
 }
 
+// Recipient email reaches nodemailer's `to` field unsanitized in the
+// recipient-email route. A basic shape check rejects embedded CR/LF (and any
+// other whitespace) up front, closing off SMTP envelope/header injection —
+// without this, "victim@example.com\r\nBcc: attacker@evil.com" gets parsed
+// by nodemailer as an address group and silently redirects the entire
+// signing-link email to the attacker's address instead of the recipient's.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Recipient name is interpolated into both the certificate PDF and the raw
+// HTML email body; reject embedded CR/LF so it can't smuggle extra header
+// lines or break out of its single-line rendering context.
+const CONTROL_CHARS_RE = /[\r\n]/;
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -47,6 +59,18 @@ export async function POST(
     ) {
       return NextResponse.json(
         { error: `Missing name/email assignment for signer role "${role.name}"` },
+        { status: 400 }
+      );
+    }
+    if (CONTROL_CHARS_RE.test(assignment.name) || CONTROL_CHARS_RE.test(assignment.email)) {
+      return NextResponse.json(
+        { error: `Name/email for signer role "${role.name}" contains invalid characters` },
+        { status: 400 }
+      );
+    }
+    if (!EMAIL_RE.test(assignment.email.trim())) {
+      return NextResponse.json(
+        { error: `Invalid email address for signer role "${role.name}"` },
         { status: 400 }
       );
     }

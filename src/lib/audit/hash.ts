@@ -5,6 +5,8 @@ export interface AuditHashInput {
   recipientId: string | null;
   type: string;
   detail: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
   createdAt: Date;
   prevHash: string | null;
 }
@@ -15,6 +17,8 @@ export function computeAuditHash(input: AuditHashInput): string {
     input.recipientId ?? '',
     input.type,
     input.detail ?? '',
+    input.ipAddress ?? '',
+    input.userAgent ?? '',
     input.createdAt.toISOString(),
     input.prevHash ?? '',
   ].join('|');

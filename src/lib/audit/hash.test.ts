@@ -7,6 +7,8 @@ describe('computeAuditHash', () => {
     recipientId: null as string | null,
     type: 'VIEWED',
     detail: null as string | null,
+    ipAddress: null as string | null,
+    userAgent: null as string | null,
     createdAt: new Date('2026-08-14T00:00:00.000Z'),
     prevHash: null as string | null,
   };
@@ -31,12 +33,28 @@ describe('computeAuditHash', () => {
     ).not.toBe(original);
   });
 
-  it('treats null recipientId, detail, and prevHash distinctly from any real value', () => {
+  // Regression test for a real gap found in adversarial review: ipAddress and
+  // userAgent are printed on the Certificate of Completion as tamper-evident
+  // "audit trail: verified" evidence, but were silently excluded from the
+  // hash payload — an attacker could rewrite either field on any event,
+  // at any position in the chain, with verifyAuditChain() reporting no tampering.
+  it('changes when ipAddress or userAgent changes', () => {
+    const original = computeAuditHash(base);
+    expect(computeAuditHash({ ...base, ipAddress: '203.0.113.5' })).not.toBe(original);
+    expect(computeAuditHash({ ...base, userAgent: 'evil-agent/1.0' })).not.toBe(original);
+    expect(
+      computeAuditHash({ ...base, ipAddress: '203.0.113.5' })
+    ).not.toBe(computeAuditHash({ ...base, ipAddress: '203.0.113.9' }));
+  });
+
+  it('treats null recipientId, detail, ipAddress, userAgent, and prevHash distinctly from any real value', () => {
     const withNulls = computeAuditHash(base);
     const withEmptyStrings = computeAuditHash({
       ...base,
       recipientId: '',
       detail: '',
+      ipAddress: '',
+      userAgent: '',
       prevHash: '',
     });
     expect(withNulls).toBe(withEmptyStrings);

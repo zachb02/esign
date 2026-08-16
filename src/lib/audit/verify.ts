@@ -23,6 +23,8 @@ export async function verifyAuditChain(documentId: string): Promise<AuditChainRe
       recipientId: event.recipientId,
       type: event.type,
       detail: event.detail,
+      ipAddress: event.ipAddress,
+      userAgent: event.userAgent,
       createdAt: event.createdAt,
       prevHash: event.prevHash,
     });

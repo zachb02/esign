@@ -47,11 +47,15 @@ export async function recordAuditEvent(
   const createdAt = new Date();
   const recipientId = input.recipientId ?? null;
   const detail = input.detail ?? null;
+  const ipAddress = input.ipAddress ?? null;
+  const userAgent = input.userAgent ?? null;
   const contentHash = computeAuditHash({
     documentId: input.documentId,
     recipientId,
     type: input.type,
     detail,
+    ipAddress,
+    userAgent,
     createdAt,
     prevHash: previous?.contentHash ?? null,
   });
@@ -62,8 +66,8 @@ export async function recordAuditEvent(
       recipientId,
       type: input.type,
       detail,
-      ipAddress: input.ipAddress ?? null,
-      userAgent: input.userAgent ?? null,
+      ipAddress,
+      userAgent,
       createdAt,
       contentHash,
       prevHash: previous?.contentHash ?? null,

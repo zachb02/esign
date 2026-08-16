@@ -80,6 +80,40 @@ describe('recordAuditEvent + verifyAuditChain', () => {
     expect(result.brokenAtIndex).toBe(0);
   });
 
+  it('detects tampering when ipAddress or userAgent is modified directly, even on the first event', async () => {
+    // Regression test: ipAddress/userAgent were originally excluded from the
+    // hash payload entirely, so tampering with either field went completely
+    // undetected — at any position in the chain, not just the end. This is
+    // the field printed on the Certificate of Completion as "audit trail:
+    // verified, no tampering detected" evidence, so it must be covered.
+    const document = await createDocument();
+    await prisma.$transaction((tx) =>
+      recordAuditEvent(tx, {
+        documentId: document.id,
+        type: 'VIEWED',
+        ipAddress: '203.0.113.5',
+        userAgent: 'original-agent/1.0',
+      })
+    );
+    const [event] = await prisma.auditEvent.findMany({ where: { documentId: document.id } });
+
+    await prisma.auditEvent.update({
+      where: { id: event.id },
+      data: { ipAddress: '198.51.100.9' },
+    });
+    const afterIpTamper = await verifyAuditChain(document.id);
+    expect(afterIpTamper.verified).toBe(false);
+    expect(afterIpTamper.brokenAtIndex).toBe(0);
+
+    await prisma.auditEvent.update({
+      where: { id: event.id },
+      data: { ipAddress: '203.0.113.5', userAgent: 'attacker-agent/9.9' },
+    });
+    const afterUaTamper = await verifyAuditChain(document.id);
+    expect(afterUaTamper.verified).toBe(false);
+    expect(afterUaTamper.brokenAtIndex).toBe(0);
+  });
+
   it('returns verified for a document with no events', async () => {
     const document = await createDocument();
     const result = await verifyAuditChain(document.id);

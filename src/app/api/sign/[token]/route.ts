@@ -16,21 +16,28 @@ export async function GET(
     return NextResponse.json({ error: 'Signing link not found' }, { status: 404 });
   }
 
-  await prisma.$transaction(async (tx) => {
-    await acquireDocumentAuditLock(tx, recipient.documentId);
-    const alreadyViewed = await tx.auditEvent.findFirst({
-      where: { documentId: recipient.documentId, recipientId: recipient.id, type: 'VIEWED' },
-    });
-    if (!alreadyViewed) {
-      await recordAuditEvent(tx, {
-        documentId: recipient.documentId,
-        recipientId: recipient.id,
-        type: 'VIEWED',
-        ipAddress: getRequestIp(request),
-        userAgent: getRequestUserAgent(request),
+  // Recording VIEWED is best-effort audit bookkeeping, not the primary
+  // purpose of this route — a lock-contention hiccup here must never block a
+  // signer from loading their document, so failures are logged, not thrown.
+  try {
+    await prisma.$transaction(async (tx) => {
+      await acquireDocumentAuditLock(tx, recipient.documentId);
+      const alreadyViewed = await tx.auditEvent.findFirst({
+        where: { documentId: recipient.documentId, recipientId: recipient.id, type: 'VIEWED' },
       });
-    }
-  });
+      if (!alreadyViewed) {
+        await recordAuditEvent(tx, {
+          documentId: recipient.documentId,
+          recipientId: recipient.id,
+          type: 'VIEWED',
+          ipAddress: getRequestIp(request),
+          userAgent: getRequestUserAgent(request),
+        });
+      }
+    });
+  } catch (error) {
+    console.error(`Failed to record VIEWED audit event for recipient ${recipient.id}`, error);
+  }
 
   const fields = await prisma.field.findMany({
     where: { documentId: recipient.documentId, signerRoleId: recipient.signerRoleId },

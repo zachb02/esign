@@ -110,17 +110,22 @@ export async function PATCH(
         // Empty/whitespace-only value means "clear this field" rather than a
         // validation error — remove any existing FieldValue row so
         // required-field checks at complete-time correctly see it as unfilled.
-        await prisma.$transaction(async (tx) => {
-          await tx.fieldValue.deleteMany({ where: { fieldId: field.id } });
-          await recordAuditEvent(tx, {
-            documentId: recipient.documentId,
-            recipientId: recipient.id,
-            type: 'FIELD_FILLED',
-            detail: `${field.label ?? field.type} (cleared)`,
-            ipAddress,
-            userAgent,
+        try {
+          await prisma.$transaction(async (tx) => {
+            await tx.fieldValue.deleteMany({ where: { fieldId: field.id } });
+            await recordAuditEvent(tx, {
+              documentId: recipient.documentId,
+              recipientId: recipient.id,
+              type: 'FIELD_FILLED',
+              detail: `${field.label ?? field.type} (cleared)`,
+              ipAddress,
+              userAgent,
+            });
           });
-        });
+        } catch (error) {
+          console.error(`Failed to clear field ${field.id}`, error);
+          return NextResponse.json({ error: 'Failed to save field' }, { status: 500 });
+        }
         return NextResponse.json({ fieldId: field.id, cleared: true });
       }
       data.textValue = trimmed;
@@ -137,22 +142,28 @@ export async function PATCH(
     }
   }
 
-  const value = await prisma.$transaction(async (tx) => {
-    const created = await tx.fieldValue.upsert({
-      where: { fieldId: field.id },
-      create: { fieldId: field.id, recipientId: recipient.id, ...data },
-      update: data,
+  let value;
+  try {
+    value = await prisma.$transaction(async (tx) => {
+      const created = await tx.fieldValue.upsert({
+        where: { fieldId: field.id },
+        create: { fieldId: field.id, recipientId: recipient.id, ...data },
+        update: data,
+      });
+      await recordAuditEvent(tx, {
+        documentId: recipient.documentId,
+        recipientId: recipient.id,
+        type: 'FIELD_FILLED',
+        detail: field.label ?? field.type,
+        ipAddress,
+        userAgent,
+      });
+      return created;
     });
-    await recordAuditEvent(tx, {
-      documentId: recipient.documentId,
-      recipientId: recipient.id,
-      type: 'FIELD_FILLED',
-      detail: field.label ?? field.type,
-      ipAddress,
-      userAgent,
-    });
-    return created;
-  });
+  } catch (error) {
+    console.error(`Failed to save field ${field.id}`, error);
+    return NextResponse.json({ error: 'Failed to save field' }, { status: 500 });
+  }
 
   return NextResponse.json(value);
 }

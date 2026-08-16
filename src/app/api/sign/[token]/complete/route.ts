@@ -62,26 +62,31 @@ export async function POST(
 
   const now = new Date();
 
-  await prisma.$transaction(async (tx) => {
-    for (const field of fields) {
-      if (field.type === 'DATE_SIGNED' && !field.value) {
-        await tx.fieldValue.create({
-          data: { fieldId: field.id, recipientId: recipient.id, dateValue: now },
-        });
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const field of fields) {
+        if (field.type === 'DATE_SIGNED' && !field.value) {
+          await tx.fieldValue.create({
+            data: { fieldId: field.id, recipientId: recipient.id, dateValue: now },
+          });
+        }
       }
-    }
-    await tx.recipient.update({
-      where: { id: recipient.id },
-      data: { status: 'SIGNED', signedAt: now },
+      await tx.recipient.update({
+        where: { id: recipient.id },
+        data: { status: 'SIGNED', signedAt: now },
+      });
+      await recordAuditEvent(tx, {
+        documentId: recipient.documentId,
+        recipientId: recipient.id,
+        type: 'SIGNED',
+        ipAddress,
+        userAgent,
+      });
     });
-    await recordAuditEvent(tx, {
-      documentId: recipient.documentId,
-      recipientId: recipient.id,
-      type: 'SIGNED',
-      ipAddress,
-      userAgent,
-    });
-  });
+  } catch (error) {
+    console.error(`Failed to record signing for recipient ${recipient.id}`, error);
+    return NextResponse.json({ error: 'Failed to complete signing' }, { status: 500 });
+  }
 
   const remainingPending = await prisma.recipient.count({
     where: { documentId: recipient.documentId, status: 'PENDING' },

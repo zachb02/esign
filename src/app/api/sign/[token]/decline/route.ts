@@ -43,25 +43,31 @@ export async function POST(
   // (recordAuditEvent) — never the reverse — to avoid a deadlock against
   // complete/route.ts's COMPLETED-event transaction, which takes the same two
   // locks in this order.
-  const count = await prisma.$transaction(async (tx) => {
-    await tx.recipient.update({
-      where: { id: recipient.id },
-      data: { status: 'DECLINED', declinedAt: now, declineReason: reason },
+  let count;
+  try {
+    count = await prisma.$transaction(async (tx) => {
+      await tx.recipient.update({
+        where: { id: recipient.id },
+        data: { status: 'DECLINED', declinedAt: now, declineReason: reason },
+      });
+      const result = await tx.document.updateMany({
+        where: { id: recipient.documentId, status: { notIn: ['DECLINED', 'COMPLETED'] } },
+        data: { status: 'DECLINED' },
+      });
+      await recordAuditEvent(tx, {
+        documentId: recipient.documentId,
+        recipientId: recipient.id,
+        type: 'DECLINED',
+        detail: reason,
+        ipAddress,
+        userAgent,
+      });
+      return result.count;
     });
-    const result = await tx.document.updateMany({
-      where: { id: recipient.documentId, status: { notIn: ['DECLINED', 'COMPLETED'] } },
-      data: { status: 'DECLINED' },
-    });
-    await recordAuditEvent(tx, {
-      documentId: recipient.documentId,
-      recipientId: recipient.id,
-      type: 'DECLINED',
-      detail: reason,
-      ipAddress,
-      userAgent,
-    });
-    return result.count;
-  });
+  } catch (error) {
+    console.error(`Failed to decline for recipient ${recipient.id}`, error);
+    return NextResponse.json({ error: 'Failed to decline this document' }, { status: 500 });
+  }
   if (count === 0) {
     console.log(
       `Document ${recipient.documentId} was already finalized by a concurrent request; skipping DECLINED status write`

@@ -140,7 +140,7 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
     const confirmed = window.confirm(
       `This will send "${title}" right now and open the signing page for ${role?.name ?? 'this role'}. ` +
         (otherRoleNames.length > 0
-          ? `It also creates live signing links for every other signer role (${otherRoleNames.join(', ')}). `
+          ? `It also creates live signing links for every other signer role: ${otherRoleNames.map((n) => `"${n}"`).join(', ')}. `
           : '') +
         'The document will be locked and can no longer be edited here. Continue?'
     );
@@ -163,8 +163,22 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
         window.alert(body.error ?? 'Failed to send');
         return;
       }
-      const body = await response.json();
-      const recipient = body.recipients.find((r: { signerRoleId: string }) => r.signerRoleId === roleId);
+      // response.ok is true past this point, so the server has already
+      // committed the send — a parse failure here is not the same
+      // "may or may not have happened" uncertainty as a network-level
+      // failure below, so it gets its own message rather than falling into
+      // the generic catch.
+      let body: { recipients: Array<{ signerRoleId: string; signingToken: string }> };
+      try {
+        body = await response.json();
+      } catch {
+        window.alert(
+          `This document was sent, but the server's response couldn't be read. Check the Manage page for the signing links.`
+        );
+        router.refresh();
+        return;
+      }
+      const recipient = body.recipients.find((r) => r.signerRoleId === roleId);
       if (recipient) {
         router.push(`/sign/${recipient.signingToken}`);
         return;

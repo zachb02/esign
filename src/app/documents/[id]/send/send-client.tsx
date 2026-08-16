@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface SignerRoleSummary {
   id: string;
@@ -21,6 +22,7 @@ interface RecipientLink {
 }
 
 export function SendClient({ documentId, title, signerRoles, status }: SendClientProps) {
+  const router = useRouter();
   const [assignments, setAssignments] = useState<Record<string, { name: string; email: string }>>(
     Object.fromEntries(signerRoles.map((r) => [r.id, { name: '', email: '' }]))
   );
@@ -60,12 +62,24 @@ export function SendClient({ documentId, title, signerRoles, status }: SendClien
         setError(body.error ?? 'Failed to send');
         return;
       }
-      const body = await response.json();
+      // response.ok is true past this point, so the server already
+      // committed the send — a parse failure here isn't the same
+      // "may or may not have happened" uncertainty as a network-level
+      // failure below, so it gets its own message.
+      let body: { recipients: RecipientLink[] };
+      try {
+        body = await response.json();
+      } catch {
+        setError(`This document was sent, but the server's response couldn't be read. Reload to see the signing links.`);
+        router.refresh();
+        return;
+      }
       setLinks(body.recipients);
     } catch {
       setError(
         'Lost connection while sending — this document may or may not have actually been sent. Check the Documents list before trying again.'
       );
+      router.refresh();
     } finally {
       setSending(false);
     }

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { FIELD_TYPE_LABELS, ROLE_COLORS } from '@/lib/fields/field-defaults';
 import type { FieldTypeValue, SignerRoleRecord } from './types';
 
@@ -11,6 +12,7 @@ interface FieldPaletteProps {
   onSelectRole: (roleId: string) => void;
   onAddRole: () => void;
   onDeleteRole: (roleId: string) => void;
+  onRenameRole: (roleId: string, name: string) => void;
   onDragFieldType: (type: FieldTypeValue, event: React.DragEvent) => void;
 }
 
@@ -20,8 +22,26 @@ export function FieldPalette({
   onSelectRole,
   onAddRole,
   onDeleteRole,
+  onRenameRole,
   onDragFieldType,
 }: FieldPaletteProps) {
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState('');
+
+  function startEditing(role: SignerRoleRecord) {
+    setEditingRoleId(role.id);
+    setDraftName(role.name);
+  }
+
+  function commitEdit() {
+    if (!editingRoleId) return;
+    const trimmed = draftName.trim();
+    const role = roles.find((r) => r.id === editingRoleId);
+    if (trimmed && role && trimmed !== role.name) {
+      onRenameRole(editingRoleId, trimmed);
+    }
+    setEditingRoleId(null);
+  }
   return (
     <div className="flex w-64 shrink-0 flex-col gap-6 overflow-y-auto border-r p-4">
       <div>
@@ -55,7 +75,35 @@ export function FieldPalette({
                   className="h-3 w-3 shrink-0 rounded-full"
                   style={{ backgroundColor: ROLE_COLORS[role.colorIndex % ROLE_COLORS.length] }}
                 />
-                <span className="truncate">{role.name}</span>
+                {editingRoleId === role.id ? (
+                  <input
+                    autoFocus
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onBlur={commitEdit}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.currentTarget.blur();
+                      } else if (e.key === 'Escape') {
+                        setEditingRoleId(null);
+                      }
+                    }}
+                    className="min-w-0 flex-1 rounded border px-1 py-0.5 text-sm"
+                  />
+                ) : (
+                  <span
+                    className="truncate"
+                    title="Double-click to rename"
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      startEditing(role);
+                    }}
+                  >
+                    {role.name}
+                  </span>
+                )}
               </span>
               <span
                 onClick={(e) => {

@@ -3,6 +3,33 @@ import { prisma } from '@/lib/db/prisma';
 import { pickReassignmentRole } from '@/lib/fields/role-reassignment';
 import { isDocumentEditable } from '@/lib/documents/lock';
 
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const body = await request.json().catch(() => null);
+  const existing = await prisma.signerRole.findUnique({ where: { id } });
+  if (!existing) {
+    return NextResponse.json({ error: 'Signer role not found' }, { status: 404 });
+  }
+  if (existing.documentId) {
+    const document = await prisma.document.findUnique({ where: { id: existing.documentId } });
+    if (document && !isDocumentEditable(document.status)) {
+      return NextResponse.json({ error: 'This document can no longer be edited' }, { status: 400 });
+    }
+  }
+
+  const name =
+    body && typeof body === 'object' && typeof body.name === 'string' ? body.name.trim() : '';
+  if (!name) {
+    return NextResponse.json({ error: 'name is required' }, { status: 400 });
+  }
+
+  const updated = await prisma.signerRole.update({ where: { id }, data: { name } });
+  return NextResponse.json(updated);
+}
+
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

@@ -133,6 +133,91 @@ describe('signer-roles API', () => {
     expect(reloaded?.signerRoleId).toBe(roleB.id);
   });
 
+  it('renames a role via PATCH', async () => {
+    const template = await createTemplate();
+    const { body: role } = await createRole(
+      new NextRequest('http://localhost/api/signer-roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerType: 'template', ownerId: template.id }),
+      })
+    );
+    const patchRequest = new NextRequest(`http://localhost/api/signer-roles/${role.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Buyer' }),
+    });
+    const patchResponse = await signerRoleRoute.PATCH(patchRequest, {
+      params: Promise.resolve({ id: role.id }),
+    });
+    expect(patchResponse.status).toBe(200);
+    const updated = await patchResponse.json();
+    expect(updated.name).toBe('Buyer');
+
+    const reloaded = await prisma.signerRole.findUnique({ where: { id: role.id } });
+    expect(reloaded?.name).toBe('Buyer');
+  });
+
+  it('rejects renaming a role to an empty/whitespace-only name', async () => {
+    const template = await createTemplate();
+    const { body: role } = await createRole(
+      new NextRequest('http://localhost/api/signer-roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerType: 'template', ownerId: template.id }),
+      })
+    );
+    const patchRequest = new NextRequest(`http://localhost/api/signer-roles/${role.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '   ' }),
+    });
+    const patchResponse = await signerRoleRoute.PATCH(patchRequest, {
+      params: Promise.resolve({ id: role.id }),
+    });
+    expect(patchResponse.status).toBe(400);
+
+    const reloaded = await prisma.signerRole.findUnique({ where: { id: role.id } });
+    expect(reloaded?.name).toBe('Signer 1');
+  });
+
+  it('rejects a PATCH with a null JSON body instead of crashing', async () => {
+    // Regression test: `request.json()` parses the literal JSON body "null"
+    // to JS `null`, and unguarded `body.name` access on that throws a
+    // TypeError — found by adversarial review.
+    const template = await createTemplate();
+    const { body: role } = await createRole(
+      new NextRequest('http://localhost/api/signer-roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerType: 'template', ownerId: template.id }),
+      })
+    );
+    const patchRequest = new NextRequest(`http://localhost/api/signer-roles/${role.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'null',
+    });
+    const patchResponse = await signerRoleRoute.PATCH(patchRequest, {
+      params: Promise.resolve({ id: role.id }),
+    });
+    expect(patchResponse.status).toBe(400);
+    const body = await patchResponse.json();
+    expect(body.error).toBe('name is required');
+  });
+
+  it('returns 404 when renaming a non-existent role', async () => {
+    const patchRequest = new NextRequest('http://localhost/api/signer-roles/does-not-exist', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Buyer' }),
+    });
+    const patchResponse = await signerRoleRoute.PATCH(patchRequest, {
+      params: Promise.resolve({ id: 'does-not-exist' }),
+    });
+    expect(patchResponse.status).toBe(404);
+  });
+
   it('assigns a non-colliding order to a new role after a middle role is deleted', async () => {
     const template = await createTemplate();
     const { body: role1 } = await createRole(

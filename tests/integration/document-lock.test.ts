@@ -99,6 +99,20 @@ describe('document lock enforcement', () => {
     expect(response.status).toBe(400);
   });
 
+  it('rejects renaming a signer role on a non-DRAFT document', async () => {
+    const { role } = await createSentDocumentWithFieldAndRole();
+    const request = new NextRequest(`http://localhost/api/signer-roles/${role.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'New Name' }),
+    });
+    const response = await signerRoleRoute.PATCH(request, { params: Promise.resolve({ id: role.id }) });
+    expect(response.status).toBe(400);
+
+    const reloaded = await prisma.signerRole.findUnique({ where: { id: role.id } });
+    expect(reloaded?.name).toBe('Signer 1');
+  });
+
   it('rejects deleting a signer role on a non-DRAFT document', async () => {
     const { document, role } = await createSentDocumentWithFieldAndRole();
     await prisma.signerRole.create({

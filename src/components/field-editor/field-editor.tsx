@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { FieldPalette } from './field-palette';
@@ -25,6 +26,7 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [numPages, setNumPages] = useState(0);
+  const isLoading = numPages === 0;
   const pageRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
 
@@ -109,6 +111,21 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
     loadFields();
   }
 
+  async function renameRole(roleId: string, name: string) {
+    const response = await fetch(`/api/signer-roles/${roleId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Failed to rename signer role' }));
+      window.alert(body.error ?? 'Failed to rename signer role');
+      loadRoles();
+      return;
+    }
+    loadRoles();
+  }
+
   async function createField(type: FieldTypeValue, page: number, x: number, y: number) {
     const response = await fetch('/api/fields', {
       method: 'POST',
@@ -163,55 +180,80 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
   }
 
   return (
-    <div className="flex h-full">
-      <FieldPalette
-        roles={roles}
-        selectedRoleId={selectedRoleId}
-        onSelectRole={setSelectedRoleId}
-        onAddRole={addRole}
-        onDeleteRole={deleteRole}
-        onDragFieldType={(type, event) =>
-          event.dataTransfer.setData('application/x-esign-field-type', type)
-        }
-      />
-      <div
-        className="flex-1 overflow-y-auto bg-neutral-100 p-6"
-        onClick={() => setSelectedFieldId(null)}
-      >
-        <h1 className="mb-4 font-medium">{title}</h1>
-        <div className="flex flex-col items-center gap-6">
-          {Array.from({ length: numPages }, (_, i) => i + 1).map((page) => (
-            <div
-              key={page}
-              data-page-surface
-              className="relative shadow"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => handleDropOnPage(page, event)}
-            >
-              <canvas
-                ref={(el) => {
-                  pageRefs.current[page] = el;
-                }}
-              />
-              {fields
-                .filter((f) => f.page === page)
-                .map((field) => (
-                  <FieldBox
-                    key={field.id}
-                    field={field}
-                    role={roles.find((r) => r.id === field.signerRoleId)}
-                    roles={roles}
-                    isSelected={selectedFieldId === field.id}
-                    onSelect={() => setSelectedFieldId(field.id)}
-                    onMove={(x, y) => patchField(field.id, { x, y })}
-                    onResize={(width, height) => patchField(field.id, { width, height })}
-                    onReassignRole={(roleId) => patchField(field.id, { signerRoleId: roleId })}
-                    onToggleRequired={() => patchField(field.id, { required: !field.required })}
-                    onDelete={() => deleteField(field.id)}
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b px-4 py-2">
+        <span className="truncate text-sm font-medium">{title}</span>
+        {ownerType === 'document' && (
+          <Link
+            href={`/documents/${ownerId}/send`}
+            aria-disabled={fields.length === 0}
+            className={
+              fields.length === 0
+                ? 'pointer-events-none rounded border px-3 py-1 text-sm text-neutral-300'
+                : 'rounded border px-3 py-1 text-sm hover:bg-neutral-50'
+            }
+          >
+            Send
+          </Link>
+        )}
+      </div>
+      <div className="flex flex-1 overflow-hidden">
+        <FieldPalette
+          roles={roles}
+          selectedRoleId={selectedRoleId}
+          onSelectRole={setSelectedRoleId}
+          onAddRole={addRole}
+          onDeleteRole={deleteRole}
+          onRenameRole={renameRole}
+          onDragFieldType={(type, event) =>
+            event.dataTransfer.setData('application/x-esign-field-type', type)
+          }
+        />
+        <div
+          className="flex-1 overflow-y-auto bg-neutral-100 p-6"
+          onClick={() => setSelectedFieldId(null)}
+        >
+          <h1 className="mb-4 font-medium">{title}</h1>
+          {isLoading ? (
+            <p className="p-6 text-center text-sm text-neutral-500">Loading document…</p>
+          ) : (
+            <div className="flex flex-col items-center gap-6">
+              {Array.from({ length: numPages }, (_, i) => i + 1).map((page) => (
+                <div
+                  key={page}
+                  data-page-surface
+                  className="relative shadow"
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => handleDropOnPage(page, event)}
+                >
+                  <canvas
+                    ref={(el) => {
+                      pageRefs.current[page] = el;
+                    }}
                   />
-                ))}
+                  {fields
+                    .filter((f) => f.page === page)
+                    .map((field) => (
+                      <FieldBox
+                        key={field.id}
+                        field={field}
+                        role={roles.find((r) => r.id === field.signerRoleId)}
+                        roles={roles}
+                        isSelected={selectedFieldId === field.id}
+                        onSelect={() => setSelectedFieldId(field.id)}
+                        onMove={(x, y) => patchField(field.id, { x, y })}
+                        onResize={(width, height) => patchField(field.id, { width, height })}
+                        onReassignRole={(roleId) => patchField(field.id, { signerRoleId: roleId })}
+                        onToggleRequired={() =>
+                          patchField(field.id, { required: !field.required })
+                        }
+                        onDelete={() => deleteField(field.id)}
+                      />
+                    ))}
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       </div>
     </div>

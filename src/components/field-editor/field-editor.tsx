@@ -136,8 +136,12 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
       return;
     }
     const role = roles.find((r) => r.id === roleId);
+    const otherRoleNames = roles.filter((r) => r.id !== roleId).map((r) => r.name);
     const confirmed = window.confirm(
-      `This will send "${title}" for signing as ${role?.name ?? 'this role'} right now. ` +
+      `This will send "${title}" right now and open the signing page for ${role?.name ?? 'this role'}. ` +
+        (otherRoleNames.length > 0
+          ? `It also creates live signing links for every other signer role (${otherRoleNames.join(', ')}). `
+          : '') +
         'The document will be locked and can no longer be edited here. Continue?'
     );
     if (!confirmed) return;
@@ -174,6 +178,16 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
       // document's new locked state.
       window.alert(
         'This document was sent, but the signer role you clicked no longer exists. Check the Manage page for the signing links.'
+      );
+      router.refresh();
+    } catch {
+      // A network-level failure (dropped connection, offline, timeout) means
+      // we genuinely don't know whether the server committed the send before
+      // the response was lost — the confirm() dialog promised a clear
+      // outcome, so don't leave the user guessing silently.
+      window.alert(
+        'Lost connection while sending — this document may or may not have actually been sent. ' +
+          'Check the Documents list before trying again.'
       );
       router.refresh();
     } finally {

@@ -37,27 +37,38 @@ export function SendClient({ documentId, title, signerRoles, status }: SendClien
   }
 
   async function handleSend() {
+    const confirmed = window.confirm(
+      `Send "${title}" now? Once sent, this document is locked and can no longer be edited.`
+    );
+    if (!confirmed) return;
     setSending(true);
     setError(null);
-    const response = await fetch(`/api/documents/${documentId}/send`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        assignments: signerRoles.map((role) => ({
-          signerRoleId: role.id,
-          name: assignments[role.id].name,
-          email: assignments[role.id].email,
-        })),
-      }),
-    });
-    setSending(false);
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({ error: 'Failed to send' }));
-      setError(body.error ?? 'Failed to send');
-      return;
+    try {
+      const response = await fetch(`/api/documents/${documentId}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assignments: signerRoles.map((role) => ({
+            signerRoleId: role.id,
+            name: assignments[role.id].name,
+            email: assignments[role.id].email,
+          })),
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: 'Failed to send' }));
+        setError(body.error ?? 'Failed to send');
+        return;
+      }
+      const body = await response.json();
+      setLinks(body.recipients);
+    } catch {
+      setError(
+        'Lost connection while sending — this document may or may not have actually been sent. Check the Documents list before trying again.'
+      );
+    } finally {
+      setSending(false);
     }
-    const body = await response.json();
-    setLinks(body.recipients);
   }
 
   if (links) {

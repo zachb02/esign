@@ -14,6 +14,7 @@ interface FieldPaletteProps {
   onDeleteRole: (roleId: string) => void;
   onRenameRole: (roleId: string, name: string) => void;
   onSignAsRole?: (roleId: string) => void;
+  signingDisabled?: boolean;
   onDragFieldType: (type: FieldTypeValue, event: React.DragEvent) => void;
 }
 
@@ -25,6 +26,7 @@ export function FieldPalette({
   onDeleteRole,
   onRenameRole,
   onSignAsRole,
+  signingDisabled,
   onDragFieldType,
 }: FieldPaletteProps) {
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
@@ -112,10 +114,14 @@ export function FieldPalette({
                   <span
                     onClick={(e) => {
                       e.stopPropagation();
-                      onSignAsRole(role.id);
+                      if (!signingDisabled) onSignAsRole(role.id);
                     }}
                     title="Sign as this role now"
-                    className="text-blue-600 hover:text-blue-800"
+                    className={
+                      signingDisabled
+                        ? 'text-neutral-300'
+                        : 'cursor-pointer text-blue-600 hover:text-blue-800'
+                    }
                   >
                     Sign
                   </span>

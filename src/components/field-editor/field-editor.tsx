@@ -29,6 +29,7 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [numPages, setNumPages] = useState(0);
   const isLoading = numPages === 0;
+  const [signing, setSigning] = useState(false);
   const pageRefs = useRef<Record<number, HTMLCanvasElement | null>>({});
   const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
 
@@ -129,30 +130,48 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
   }
 
   async function signAsRole(roleId: string) {
+    if (signing) return;
     if (fields.length === 0) {
       window.alert('Add at least one field before signing');
       return;
     }
-    const response = await fetch(`/api/documents/${ownerId}/send`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        assignments: roles.map((role) => ({
-          signerRoleId: role.id,
-          name: role.name,
-          email: `preview-${role.id}@local.test`,
-        })),
-      }),
-    });
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({ error: 'Failed to send' }));
-      window.alert(body.error ?? 'Failed to send');
-      return;
-    }
-    const body = await response.json();
-    const recipient = body.recipients.find((r: { signerRoleId: string }) => r.signerRoleId === roleId);
-    if (recipient) {
-      router.push(`/sign/${recipient.signingToken}`);
+    setSigning(true);
+    try {
+      const response = await fetch(`/api/documents/${ownerId}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assignments: roles.map((role) => ({
+            signerRoleId: role.id,
+            name: role.name,
+            email: `preview-${role.id}@local.test`,
+          })),
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: 'Failed to send' }));
+        window.alert(body.error ?? 'Failed to send');
+        return;
+      }
+      const body = await response.json();
+      const recipient = body.recipients.find((r: { signerRoleId: string }) => r.signerRoleId === roleId);
+      if (recipient) {
+        router.push(`/sign/${recipient.signingToken}`);
+        return;
+      }
+      // The document was sent successfully (every current role got a real
+      // recipient), but the specific role that was clicked isn't among
+      // them — it must have been deleted (e.g. from another tab) between
+      // this tab's last role fetch and this click. The send already
+      // happened and can't be undone, so surface that clearly instead of
+      // silently doing nothing, and refresh so this page reflects the
+      // document's new locked state.
+      window.alert(
+        'This document was sent, but the signer role you clicked no longer exists. Check the Manage page for the signing links.'
+      );
+      router.refresh();
+    } finally {
+      setSigning(false);
     }
   }
 
@@ -236,6 +255,7 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
           onDeleteRole={deleteRole}
           onRenameRole={renameRole}
           onSignAsRole={ownerType === 'document' ? signAsRole : undefined}
+          signingDisabled={signing}
           onDragFieldType={(type, event) =>
             event.dataTransfer.setData('application/x-esign-field-type', type)
           }

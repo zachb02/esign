@@ -128,7 +128,7 @@ export function FieldBox({
         event.stopPropagation();
         onSelect();
       }}
-      className="absolute flex cursor-move items-center justify-center overflow-hidden rounded border-2 text-[10px] font-medium"
+      className="absolute flex cursor-move items-center justify-center rounded border-2 text-[10px] font-medium"
       style={{
         left: `${displayX * 100}%`,
         top: `${displayY * 100}%`,
@@ -139,7 +139,9 @@ export function FieldBox({
         color,
       }}
     >
-      {FIELD_TYPE_LABELS[field.type]}
+      <span className="overflow-hidden text-ellipsis whitespace-nowrap px-1">
+        {FIELD_TYPE_LABELS[field.type]}
+      </span>
       <div
         onMouseDown={handleResizeMouseDown}
         className="absolute bottom-0 right-0 h-3 w-3 cursor-se-resize"

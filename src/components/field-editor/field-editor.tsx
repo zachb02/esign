@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { FieldPalette } from './field-palette';
@@ -21,6 +22,7 @@ interface FieldEditorProps {
 }
 
 export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorProps) {
+  const router = useRouter();
   const [roles, setRoles] = useState<SignerRoleRecord[]>([]);
   const [fields, setFields] = useState<FieldRecord[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
@@ -126,6 +128,34 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
     loadRoles();
   }
 
+  async function signAsRole(roleId: string) {
+    if (fields.length === 0) {
+      window.alert('Add at least one field before signing');
+      return;
+    }
+    const response = await fetch(`/api/documents/${ownerId}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        assignments: roles.map((role) => ({
+          signerRoleId: role.id,
+          name: role.name,
+          email: `preview-${role.id}@local.test`,
+        })),
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Failed to send' }));
+      window.alert(body.error ?? 'Failed to send');
+      return;
+    }
+    const body = await response.json();
+    const recipient = body.recipients.find((r: { signerRoleId: string }) => r.signerRoleId === roleId);
+    if (recipient) {
+      router.push(`/sign/${recipient.signingToken}`);
+    }
+  }
+
   async function createField(type: FieldTypeValue, page: number, x: number, y: number) {
     const response = await fetch('/api/fields', {
       method: 'POST',
@@ -205,6 +235,7 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
           onAddRole={addRole}
           onDeleteRole={deleteRole}
           onRenameRole={renameRole}
+          onSignAsRole={ownerType === 'document' ? signAsRole : undefined}
           onDragFieldType={(type, event) =>
             event.dataTransfer.setData('application/x-esign-field-type', type)
           }

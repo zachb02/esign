@@ -258,6 +258,9 @@ export function SignClient({ token }: SignClientProps) {
         </div>
       </header>
       <div className="flex-1 overflow-y-auto bg-neutral-100 p-6">
+        {numPages === 0 ? (
+          <p className="p-6 text-center text-sm text-neutral-500">Loading document…</p>
+        ) : (
         <div className="flex flex-col items-center gap-6">
           {Array.from({ length: numPages }, (_, i) => i + 1).map((page) => (
             <div key={page} className="relative shadow">
@@ -322,6 +325,7 @@ export function SignClient({ token }: SignClientProps) {
             </div>
           ))}
         </div>
+        )}
       </div>
     </div>
   );

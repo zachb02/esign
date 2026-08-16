@@ -116,14 +116,14 @@ export function FieldPalette({
                       e.stopPropagation();
                       if (!signingDisabled) onSignAsRole(role.id);
                     }}
-                    title="Sign as this role now"
+                    title="Sends this document now and opens the real signing page for this role"
                     className={
                       signingDisabled
                         ? 'text-neutral-300'
                         : 'cursor-pointer text-blue-600 hover:text-blue-800'
                     }
                   >
-                    Sign
+                    Send &amp; sign
                   </span>
                 )}
                 <span

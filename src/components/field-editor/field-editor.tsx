@@ -135,6 +135,12 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
       window.alert('Add at least one field before signing');
       return;
     }
+    const role = roles.find((r) => r.id === roleId);
+    const confirmed = window.confirm(
+      `This will send "${title}" for signing as ${role?.name ?? 'this role'} right now. ` +
+        'The document will be locked and can no longer be edited here. Continue?'
+    );
+    if (!confirmed) return;
     setSigning(true);
     try {
       const response = await fetch(`/api/documents/${ownerId}/send`, {

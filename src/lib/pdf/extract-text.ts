@@ -23,11 +23,13 @@ export async function extractPdfText(
 ): Promise<ExtractedText> {
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(pdfBuffer),
-    // Same fix render.ts needs for rendering standard-14 fonts (Helvetica,
-    // etc. referenced by name only, not embedded) — without it pdfjs-dist
-    // can't resolve glyph-to-Unicode mapping for that text and getTextContent
-    // silently returns incomplete/empty items for affected pages instead of
-    // throwing, which would otherwise corrupt the truncation-boundary logic.
+    // Empirically, getTextContent()'s string values come from
+    // WinAnsiEncoding/glyph-name tables, not this option — unlike
+    // render.ts's genuine need for it to resolve glyph *outlines* for
+    // rendering. Without it, pdfjs-dist only logs a swallowed
+    // "standardFontDataUrl" warning internally; text extraction is
+    // unaffected. Kept for parity with render.ts and to silence that
+    // warning, not because it fixes a real extraction bug.
     standardFontDataUrl: path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/'),
   });
   const pdfDocument = await loadingTask.promise;

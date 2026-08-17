@@ -55,6 +55,7 @@ async function summarizeWithOpenAI(text: string, apiKey: string): Promise<string
     },
     body: JSON.stringify({
       model: 'gpt-4o',
+      max_tokens: 1024,
       messages: [
         { role: 'system', content: PROMPT_INSTRUCTIONS },
         { role: 'user', content: `Document text:\n\n${text}` },

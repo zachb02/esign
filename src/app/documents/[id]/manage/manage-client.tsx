@@ -83,7 +83,7 @@ export function ManageClient({
 
       {status === 'COMPLETED' && (
         <a
-          href={`/api/documents/${documentId}/file`}
+          href={`/api/documents/${documentId}/file?download=1`}
           download
           className="mb-8 inline-block rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
         >

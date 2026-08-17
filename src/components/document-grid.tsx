@@ -124,7 +124,7 @@ export function DocumentGrid({ documents }: DocumentGridProps) {
                   Manage
                 </Link>
                 {doc.status === 'COMPLETED' && (
-                  <a href={`/api/documents/${doc.id}/file`} download className="underline">
+                  <a href={`/api/documents/${doc.id}/file?download=1`} download className="underline">
                     Download
                   </a>
                 )}

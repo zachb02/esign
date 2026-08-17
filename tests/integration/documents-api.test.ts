@@ -88,6 +88,24 @@ describe('documents API', () => {
     expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
   });
 
+  it('serves the file inline by default, and as an attachment with ?download=1', async () => {
+    const { body: document } = await uploadPdf('disposition.pdf', 1);
+
+    const inlineRequest = new NextRequest(`http://localhost/api/documents/${document.id}/file`);
+    const inlineResponse = await fileRoute.GET(inlineRequest, {
+      params: Promise.resolve({ id: document.id }),
+    });
+    expect(inlineResponse.headers.get('Content-Disposition')).toMatch(/^inline;/);
+
+    const downloadRequest = new NextRequest(
+      `http://localhost/api/documents/${document.id}/file?download=1`
+    );
+    const downloadResponse = await fileRoute.GET(downloadRequest, {
+      params: Promise.resolve({ id: document.id }),
+    });
+    expect(downloadResponse.headers.get('Content-Disposition')).toMatch(/^attachment;/);
+  });
+
   it('serves a generated thumbnail as a PNG', async () => {
     const { body: document } = await uploadPdf('thumb.pdf', 1);
     const request = new NextRequest(`http://localhost/api/documents/${document.id}/thumbnail`);

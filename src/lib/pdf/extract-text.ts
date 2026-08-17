@@ -17,14 +17,34 @@ export interface ExtractedText {
   truncated: boolean;
 }
 
-export async function extractPdfText(pdfBuffer: Buffer): Promise<ExtractedText> {
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) });
+export async function extractPdfText(
+  pdfBuffer: Buffer,
+  maxChars: number = MAX_CHARS
+): Promise<ExtractedText> {
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(pdfBuffer),
+    // Same fix render.ts needs for rendering standard-14 fonts (Helvetica,
+    // etc. referenced by name only, not embedded) — without it pdfjs-dist
+    // can't resolve glyph-to-Unicode mapping for that text and getTextContent
+    // silently returns incomplete/empty items for affected pages instead of
+    // throwing, which would otherwise corrupt the truncation-boundary logic.
+    standardFontDataUrl: path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/'),
+  });
   const pdfDocument = await loadingTask.promise;
   const pageTexts: string[] = [];
   let totalChars = 0;
+  // Tracked explicitly rather than derived after the fact from a length
+  // comparison — deriving it from `fullText.length > MAX_CHARS` missed the
+  // case where the per-page loop broke early on a page boundary that landed
+  // exactly at the cap, silently dropping the remaining pages while still
+  // reporting truncated: false.
+  let truncated = false;
 
   for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
-    if (totalChars >= MAX_CHARS) break;
+    if (totalChars >= maxChars) {
+      truncated = true;
+      break;
+    }
     const page = await pdfDocument.getPage(pageNumber);
     const content = await page.getTextContent();
     const pageText = content.items
@@ -38,10 +58,10 @@ export async function extractPdfText(pdfBuffer: Buffer): Promise<ExtractedText> 
 
   await pdfDocument.destroy();
 
-  const fullText = pageTexts.join('\n\n');
-  const truncated = fullText.length > MAX_CHARS;
-  return {
-    text: truncated ? fullText.slice(0, MAX_CHARS) : fullText,
-    truncated,
-  };
+  let fullText = pageTexts.join('\n\n');
+  if (fullText.length > maxChars) {
+    fullText = fullText.slice(0, maxChars);
+    truncated = true;
+  }
+  return { text: fullText, truncated };
 }

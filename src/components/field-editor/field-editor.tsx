@@ -158,12 +158,12 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
         }),
       });
       if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: 'Failed to send' }));
-        window.alert(body.error ?? 'Failed to send');
+        const body = await response.json().catch(() => ({ error: 'Failed to start signing' }));
+        window.alert(body.error ?? 'Failed to start signing');
         return;
       }
       // response.ok is true past this point, so the server has already
-      // committed the send — a parse failure here is not the same
+      // committed the lock — a parse failure here is not the same
       // "may or may not have happened" uncertainty as a network-level
       // failure below, so it gets its own message rather than falling into
       // the generic catch.
@@ -172,7 +172,7 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
         body = await response.json();
       } catch {
         window.alert(
-          `This document was sent, but the server's response couldn't be read. Check the Manage page for the signing links.`
+          `This document is locked and ready to sign, but the server's response couldn't be read. Check the Manage page for the signing links.`
         );
         router.refresh();
         return;
@@ -182,24 +182,24 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
         router.push(`/sign/${recipient.signingToken}`);
         return;
       }
-      // The document was sent successfully (every current role got a real
+      // The document was locked successfully (every current role got a real
       // recipient), but the specific role that was clicked isn't among
       // them — it must have been deleted (e.g. from another tab) between
-      // this tab's last role fetch and this click. The send already
+      // this tab's last role fetch and this click. The lock already
       // happened and can't be undone, so surface that clearly instead of
       // silently doing nothing, and refresh so this page reflects the
       // document's new locked state.
       window.alert(
-        'This document was sent, but the signer role you clicked no longer exists. Check the Manage page for the signing links.'
+        'This document is locked and ready to sign, but the signer role you clicked no longer exists. Check the Manage page for the signing links.'
       );
       router.refresh();
     } catch {
       // A network-level failure (dropped connection, offline, timeout) means
-      // we genuinely don't know whether the server committed the send before
+      // we genuinely don't know whether the server committed the lock before
       // the response was lost — the confirm() dialog promised a clear
       // outcome, so don't leave the user guessing silently.
       window.alert(
-        'Lost connection while sending — this document may or may not have actually been sent. ' +
+        'Lost connection while starting signing — this document may or may not have actually been locked. ' +
           'Check the Documents list before trying again.'
       );
       router.refresh();

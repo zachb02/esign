@@ -37,11 +37,17 @@ export async function PATCH(request: NextRequest) {
     }
   }
 
-  const settings = await prisma.appSettings.upsert({
-    where: { id: SETTINGS_ID },
-    create: { id: SETTINGS_ID, ...data },
-    update: data,
-  });
+  let settings;
+  try {
+    settings = await prisma.appSettings.upsert({
+      where: { id: SETTINGS_ID },
+      create: { id: SETTINGS_ID, ...data },
+      update: data,
+    });
+  } catch (error) {
+    console.error('Failed to save settings', error);
+    return NextResponse.json({ error: 'Failed to save settings' }, { status: 500 });
+  }
 
   return NextResponse.json({
     openaiConfigured: Boolean(settings.openaiApiKey),

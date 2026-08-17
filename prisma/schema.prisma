@@ -170,3 +170,10 @@ model AuditEvent {
 
   @@index([documentId, createdAt])
 }
+
+model AppSettings {
+  id              String   @id @default("singleton")
+  openaiApiKey    String?
+  anthropicApiKey String?
+  updatedAt       DateTime @updatedAt
+}

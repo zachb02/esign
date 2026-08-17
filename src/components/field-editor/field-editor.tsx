@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
@@ -138,7 +137,7 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
     const role = roles.find((r) => r.id === roleId);
     const otherRoleNames = roles.filter((r) => r.id !== roleId).map((r) => r.name);
     const confirmed = window.confirm(
-      `This will send "${title}" right now and open the signing page for ${role?.name ?? 'this role'}. ` +
+      `This starts signing "${title}" now as ${role?.name ?? 'this role'}. ` +
         (otherRoleNames.length > 0
           ? `It also creates live signing links for every other signer role: ${otherRoleNames.map((n) => `"${n}"`).join(', ')}. `
           : '') +
@@ -266,19 +265,6 @@ export function FieldEditor({ ownerType, ownerId, title, fileUrl }: FieldEditorP
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-4 py-2">
         <span className="truncate text-sm font-medium">{title}</span>
-        {ownerType === 'document' && (
-          <Link
-            href={`/documents/${ownerId}/send`}
-            aria-disabled={fields.length === 0}
-            className={
-              fields.length === 0
-                ? 'pointer-events-none rounded border px-3 py-1 text-sm text-neutral-300'
-                : 'rounded border px-3 py-1 text-sm hover:bg-neutral-50'
-            }
-          >
-            Send
-          </Link>
-        )}
       </div>
       <div className="flex flex-1 overflow-hidden">
         <FieldPalette

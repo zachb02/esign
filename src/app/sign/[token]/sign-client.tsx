@@ -46,6 +46,10 @@ export function SignClient({ token }: SignClientProps) {
   const [numPages, setNumPages] = useState(0);
   const [activeSignatureFieldId, setActiveSignatureFieldId] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryTruncated, setSummaryTruncated] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
   // Keyed by field.id, bumped only for the ONE field whose own save attempt
   // just resolved (success or failure). The TEXT and CHECKBOX inputs below
   // are uncontrolled (defaultValue/defaultChecked) and only resync to the
@@ -212,6 +216,21 @@ export function SignClient({ token }: SignClientProps) {
     loadSession();
   }
 
+  async function generateSummary() {
+    setSummarizing(true);
+    setSummaryError(null);
+    const response = await fetch(`/api/sign/${token}/summarize`, { method: 'POST' });
+    setSummarizing(false);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Failed to generate a summary' }));
+      setSummaryError(body.error ?? 'Failed to generate a summary');
+      return;
+    }
+    const body = await response.json();
+    setSummary(body.summary);
+    setSummaryTruncated(Boolean(body.truncated));
+  }
+
   if (loadError) {
     return <div className="p-6 text-center text-neutral-500">{loadError}</div>;
   }
@@ -257,6 +276,30 @@ export function SignClient({ token }: SignClientProps) {
           </button>
         </div>
       </header>
+      <div className="border-b bg-neutral-50 px-4 py-3">
+        {summary ? (
+          <div>
+            <p className="mb-1 text-sm font-medium">What am I signing?</p>
+            <p className="whitespace-pre-wrap text-sm text-neutral-700">{summary}</p>
+            {summaryTruncated && (
+              <p className="mt-2 text-xs text-neutral-500">
+                This document is long — the summary is based on the first part of it only.
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <button
+              disabled={summarizing}
+              onClick={generateSummary}
+              className="rounded border px-3 py-1.5 text-sm hover:bg-neutral-100 disabled:opacity-50"
+            >
+              {summarizing ? 'Summarizing…' : 'What am I signing? (AI summary)'}
+            </button>
+            {summaryError && <p className="text-xs text-red-600">{summaryError}</p>}
+          </div>
+        )}
+      </div>
       <div className="flex-1 overflow-y-auto bg-neutral-100 p-6">
         {numPages === 0 ? (
           <p className="p-6 text-center text-sm text-neutral-500">Loading document…</p>

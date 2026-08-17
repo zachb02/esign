@@ -81,6 +81,16 @@ export function ManageClient({
       <h1 className="mb-1 text-lg font-semibold">&quot;{title}&quot;</h1>
       <p className="mb-6 text-sm text-neutral-500">Status: {status}</p>
 
+      {status === 'COMPLETED' && (
+        <a
+          href={`/api/documents/${documentId}/file`}
+          download
+          className="mb-8 inline-block rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+        >
+          Download signed PDF
+        </a>
+      )}
+
       <h2 className="mb-3 text-sm font-semibold uppercase text-neutral-500">Recipients</h2>
       <ul className="mb-8 flex flex-col gap-4">
         {recipients.map((recipient) => {

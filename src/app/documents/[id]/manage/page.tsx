@@ -19,13 +19,12 @@ export default async function ManagePage({ params }: { params: Promise<{ id: str
     return (
       <div className="mx-auto max-w-xl p-6">
         <h1 className="mb-4 text-lg font-semibold">&quot;{document.title}&quot;</h1>
-        <p className="mb-4 text-sm text-neutral-500">This document has not been sent yet.</p>
+        <p className="mb-4 text-sm text-neutral-500">
+          This document hasn&apos;t been signed yet — place fields and sign it from the editor.
+        </p>
         <div className="flex gap-3 text-sm">
           <Link href={`/documents/${document.id}/edit`} className="underline">
             Edit fields
-          </Link>
-          <Link href={`/documents/${document.id}/send`} className="underline">
-            Send
           </Link>
         </div>
       </div>

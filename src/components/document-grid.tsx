@@ -116,9 +116,6 @@ export function DocumentGrid({ documents }: DocumentGridProps) {
                 <Link href={`/documents/${doc.id}/edit`} className="underline">
                   Edit fields
                 </Link>
-                <Link href={`/documents/${doc.id}/send`} className="underline">
-                  Send
-                </Link>
               </div>
             )}
             {doc.status !== 'DRAFT' && (
@@ -126,6 +123,11 @@ export function DocumentGrid({ documents }: DocumentGridProps) {
                 <Link href={`/documents/${doc.id}/manage`} className="underline">
                   Manage
                 </Link>
+                {doc.status === 'COMPLETED' && (
+                  <a href={`/api/documents/${doc.id}/file`} download className="underline">
+                    Download
+                  </a>
+                )}
               </div>
             )}
           </div>
